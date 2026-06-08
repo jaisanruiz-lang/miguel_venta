@@ -65,7 +65,6 @@ st.markdown("""
     }
     
     /* --- AGRANDAR EXCLUSIVAMENTE EL FONDO DEL FILTRO DE DEPARTAMENTOS --- */
-    /* Apunta estrictamente al CUARTO multiselect (Departamentos) por la inclusión del filtro de Áreas */
     section[data-testid="stSidebar"] div[data-testid="stMultiSelect"]:nth-of-type(4) div[data-baseweb="select"] > div:first-child {
         min-height: 300px !important;
         align-items: flex-start !important; 
@@ -100,16 +99,13 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas desde archivo externo local (distribucion_miguel.csv)
-    # Al estar afuera, si lo modificas en PC o GitHub se actualizará automáticamente sin tocar código
+    # 1. Cargar el mapa de Áreas desde archivo externo local
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
         st.stop()
         
     df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=";")
-    
-    # ffill() llena hacia abajo las agrupaciones de Área vacías originadas por celdas combinadas
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
@@ -153,11 +149,9 @@ def cargar_datos():
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].astype(str).str.strip().str.upper()
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
         
-    # Asignar el Área a las ventas mediante el diccionario creado con distribucion_miguel.csv
     df['ÁREA'] = df['DEPARTAMENTO'].map(mapa_areas).fillna('SIN ÁREA')
     
     # 3. Cargar Metros Cuadrados desde archivo externo local
-    # Igual que el archivo de áreas, si se modifica externamente se reflejará aquí
     archivo_m2 = "METROS CUADRADOS POR CATEGORIA.csv"
     if not os.path.exists(archivo_m2):
         st.error(f"No se encontró el archivo '{archivo_m2}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -181,9 +175,9 @@ def cargar_datos():
     )
     df_m2['METROS'] = pd.to_numeric(df_m2['METROS'], errors='coerce').fillna(0.0)
         
-    return df, df_m2
+    return df, df_m2, mapa_areas
 
-df, df_m2 = cargar_datos()
+df, df_m2, mapa_areas_global = cargar_datos()
 
 df = df.rename(columns={
     'ImporteDivisaPrincipal': 'VENTA',
@@ -230,17 +224,14 @@ sucursales_en_data = df['SUCURSAL'].dropna().unique()
 sucursales_disponibles = [s for s in orden_sucursales if s in sucursales_en_data]
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 
-# --- FILTRO NUEVO: ÁREAS ---
 areas_en_data = df['ÁREA'].dropna().unique()
 area_sel = st.sidebar.multiselect("Área (Agrupación)", sorted(areas_en_data), default=sorted(areas_en_data), placeholder="Seleccione Áreas...")
 
-# --- FILTRO DEPENDIENTE: DEPARTAMENTOS ---
 df_areas_filtradas = df[df['ÁREA'].isin(area_sel)]
 departamentos_en_data = df_areas_filtradas['DEPARTAMENTO'].dropna().unique()
 departamentos_disponibles = [d for d in orden_departamentos if d in departamentos_en_data]
 departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
 
-# Filtrar Data de Transacciones
 df_filtrado = df[(df['AÑO'] == año_sel) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
 df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
 
@@ -248,15 +239,17 @@ df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel
 # PROCESAMIENTO MATRICIAL DE LOS DATOS
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
+# Asignamos el área al dataframe de M2 para que se cruce correctamente
+df_m2_sel['ÁREA'] = df_m2_sel['DEPARTAMENTO'].map(mapa_areas_global).fillna('SIN ÁREA')
 
-tabla_ant = df_año_anterior.groupby(['DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
+tabla_ant = df_año_anterior.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 tabla_ant = tabla_ant.rename(columns={'VENTA': 'META'})
 tabla_ant['META'] = tabla_ant['META'] * 2
 
-tabla_actual = df_filtrado.groupby(['DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
+tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 
-tabla_ventas = pd.merge(tabla_actual, tabla_ant, on=['DEPARTAMENTO', 'CATEGORIA'], how='outer')
-tabla_base = pd.merge(df_m2_sel[['DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_ventas, on=['DEPARTAMENTO', 'CATEGORIA'], how='outer')
+tabla_ventas = pd.merge(tabla_actual, tabla_ant, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
+tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_ventas, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 
 tabla_base['VENTA'] = tabla_base['VENTA'].fillna(0.0)
 tabla_base['META'] = tabla_base['META'].fillna(0.0)
@@ -269,8 +262,8 @@ tabla_base['AVANCE'] = np.where(tabla_base['META'] > 0, (tabla_base['VENTA'] / t
 tabla_base['EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)'] = np.where(tabla_base['M2'] > 0, tabla_base['VENTA'] / tabla_base['M2'], 0.0)
 tabla_base['ORDEN_REGISTRO'] = 0
 
-# Generación de Subtotales por Departamento
-subtotales = tabla_base.groupby('DEPARTAMENTO', observed=False).agg({'VENTA': 'sum', 'META': 'sum', 'M2': 'sum'}).reset_index()
+# Generación de Subtotales por Departamento (Ahora incluye el ÁREA)
+subtotales = tabla_base.groupby(['ÁREA', 'DEPARTAMENTO'], observed=False).agg({'VENTA': 'sum', 'META': 'sum', 'M2': 'sum'}).reset_index()
 subtotales['CATEGORIA'] = 'TOTAL DEPARTAMENTO'
 subtotales['AVANCE'] = np.where(subtotales['META'] > 0, (subtotales['VENTA'] / subtotales['META']) * 100, 0.0)
 subtotales['EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)'] = np.where(subtotales['M2'] > 0, subtotales['VENTA'] / subtotales['M2'], 0.0)
@@ -284,6 +277,7 @@ total_g_avance = (total_g_venta / total_g_meta) * 100 if total_g_meta > 0 else 0
 total_g_eficiencia = total_g_venta / total_g_m2 if total_g_m2 > 0 else 0.0
 
 fila_total_general = pd.DataFrame([{
+    'ÁREA': 'TOTAL GENERAL',
     'DEPARTAMENTO': 'TOTAL GENERAL',
     'CATEGORIA': 'REPORTE CONSOLIDADO',
     'M2': total_g_m2,
@@ -297,7 +291,7 @@ fila_total_general = pd.DataFrame([{
 # Unificación final de la matriz
 tabla_final = pd.concat([tabla_base, subtotales, fila_total_general], ignore_index=True)
 
-# Mantener orden estructural jerárquico
+# Mantener orden estructural jerárquico y reordenar columnas
 tabla_final['DEPARTAMENTO'] = pd.Categorical(
     tabla_final['DEPARTAMENTO'], 
     categories=orden_departamentos + ['TOTAL GENERAL'], 
@@ -305,6 +299,7 @@ tabla_final['DEPARTAMENTO'] = pd.Categorical(
 )
 tabla_final = tabla_final.sort_values(by=["DEPARTAMENTO", "ORDEN_REGISTRO", "VENTA"], ascending=[True, True, False])
 tabla_final = tabla_final.drop(columns=['M2', 'ORDEN_REGISTRO'])
+tabla_final = tabla_final[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'VENTA', 'META', 'AVANCE', 'EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)']]
 
 # Clon limpio con números reales para construir la exportación a Excel formulable
 df_para_excel = tabla_final.copy()
@@ -364,11 +359,12 @@ def generar_excel_descarga_sumable(dataframe):
         formato_numero_excel = '#,##0.00'
         formato_porcentaje_excel = '0.00%'
         
+        # Ajustamos las letras de columnas ya que se agregó una nueva columna de texto
         for row in range(2, len(df_excel) + 2):
-            worksheet[f'C{row}'].number_format = formato_numero_excel
             worksheet[f'D{row}'].number_format = formato_numero_excel
-            worksheet[f'E{row}'].number_format = formato_porcentaje_excel
-            worksheet[f'F{row}'].number_format = formato_numero_excel
+            worksheet[f'E{row}'].number_format = formato_numero_excel
+            worksheet[f'F{row}'].number_format = formato_porcentaje_excel
+            worksheet[f'G{row}'].number_format = formato_numero_excel
             
     return output.getvalue()
 
@@ -388,12 +384,14 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     story.append(Paragraph(f"Filtros aplicados - Ventas Totales: {ventas} | Meta Dinámica: {meta} | Avance: {avance} | EFICIENCIA EXHIBICION FRONTAL (VENTA/M2): {eficiencia}", subtitle_style))
     story.append(Spacer(1, 8))
     
-    data_tabla = [[Paragraph("<b>DEPARTAMENTO</b>", header_table_style), 
-                    Paragraph("<b>CATEGORÍA</b>", header_table_style), 
-                    Paragraph("<b>VENTA</b>", header_table_style), 
-                    Paragraph("<b>META</b>", header_table_style), 
-                    Paragraph("<b>AVANCE</b>", header_table_style), 
-                    Paragraph("<b>EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)</b>", header_table_style)]]
+    # Se añade la columna ÁREA y se acorta visualmente la última columna para que encaje
+    data_tabla = [[Paragraph("<b>ÁREA</b>", header_table_style), 
+                   Paragraph("<b>DEPARTAMENTO</b>", header_table_style), 
+                   Paragraph("<b>CATEGORÍA</b>", header_table_style), 
+                   Paragraph("<b>VENTA</b>", header_table_style), 
+                   Paragraph("<b>META</b>", header_table_style), 
+                   Paragraph("<b>AVANCE</b>", header_table_style), 
+                   Paragraph("<b>EFICIENCIA (VENTA/M2)</b>", header_table_style)]]
     
     estilos_celdas = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3A8A')),
@@ -406,18 +404,19 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     
     for i, row in enumerate(dataframe.values):
         idx_fila = i + 1
-        es_total_general = (row[0] == 'TOTAL GENERAL')
-        es_subtotal = (row[1] == 'TOTAL DEPARTAMENTO')
+        es_total_general = (row[1] == 'TOTAL GENERAL')     # Ahora el Departamento está en el índice 1
+        es_subtotal = (row[2] == 'TOTAL DEPARTAMENTO')     # Ahora la Categoría está en el índice 2
         
         style_actual = cell_total_style if (es_subtotal or es_total_general) else cell_table_style
         
         data_tabla.append([
-            Paragraph(str(row[0]), style_actual),
-            Paragraph(str(row[1]), style_actual),
-            Paragraph(formatear_moneda(row[2]), style_actual),
+            Paragraph(str(row[0]), style_actual),           # ÁREA
+            Paragraph(str(row[1]), style_actual),           # DEPARTAMENTO
+            Paragraph(str(row[2]), style_actual),           # CATEGORIA
             Paragraph(formatear_moneda(row[3]), style_actual),
-            Paragraph(formatear_porcentaje(row[4]), style_actual),
-            Paragraph(formatear_moneda(row[5]), style_actual)
+            Paragraph(formatear_moneda(row[4]), style_actual),
+            Paragraph(formatear_porcentaje(row[5]), style_actual),
+            Paragraph(formatear_moneda(row[6]), style_actual)
         ])
         
         if es_total_general:
@@ -427,7 +426,8 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
             estilos_celdas.append(('BACKGROUND', (0, idx_fila), (-1, idx_fila), colors.HexColor('#D1FAE5')))
             estilos_celdas.append(('TEXTCOLOR', (0, idx_fila), (-1, idx_fila), colors.HexColor('#065F46')))
             
-    pdf_table = Table(data_tabla, colWidths=[160, 160, 100, 100, 70, 100])
+    # Se ajustan los anchos para acomodar las 7 columnas dentro de los 680-700 puntos imprimibles
+    pdf_table = Table(data_tabla, colWidths=[120, 130, 130, 80, 80, 60, 80])
     pdf_table.setStyle(TableStyle(estilos_celdas))
     story.append(pdf_table)
     
