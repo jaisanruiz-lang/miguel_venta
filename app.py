@@ -99,7 +99,7 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas y Departamentos desde el archivo de distribución de Miguel
+    # 1. Cargar el mapa de Áreas y Departamentos desde el archivo de distribución
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -220,6 +220,18 @@ orden_meses = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 orden_sucursales = ['CATIA', 'LA GUAIRA', 'MARICHE', 'GUATIRE', 'ALUMUNIOLOGO WED', 
                     'DISTRIBUIDORES', 'REPRESENTANTES COMERCIALES', 'SHOWROOM']
 
+orden_areas_personalizado = [
+    'LAMINAS Y PERFILERIA ESTANDAR',
+    'VENTANAS',
+    'PUERTAS, DIVISIONES Y BARANDAS',
+    'PROTECCION SOLAR',
+    'INSUMOS Y FERRETERIA',
+    'DRYWALL Y MUEBLERIA',
+    'SERVICIOS',
+    'SIN ÁREA',
+    'OTROS'
+]
+
 df['MES'] = pd.Categorical(df['MES'].astype(str).str.upper().str.strip(), categories=orden_meses, ordered=True)
 df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in orden_sucursales], ordered=True)
 
@@ -238,8 +250,11 @@ sucursales_en_data = df['SUCURSAL'].dropna().unique()
 sucursales_disponibles = [s for s in orden_sucursales if s in sucursales_en_data]
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 
+# Ordenar las opciones del filtro según la jerarquía solicitada
 areas_en_data = df['ÁREA'].dropna().unique()
-area_sel = st.sidebar.multiselect("Área (Agrupación)", sorted(areas_en_data), default=sorted(areas_en_data), placeholder="Seleccione Áreas...")
+areas_ordenadas_filtro = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
+
+area_sel = st.sidebar.multiselect("Área (Agrupación)", areas_ordenadas_filtro, default=areas_ordenadas_filtro, placeholder="Seleccione Áreas...")
 
 df_areas_filtradas = df[df['ÁREA'].isin(area_sel)]
 departamentos_en_data = df_areas_filtradas['DEPARTAMENTO'].dropna().unique()
@@ -303,14 +318,24 @@ fila_total_general = pd.DataFrame([{
 # Unificación final de la matriz
 tabla_final = pd.concat([tabla_base, subtotales, fila_total_general], ignore_index=True)
 
-# Crear orden dinámico agrupando jerárquicamente: Área > Departamento > Venta
-tabla_final['ORDEN_AREA'] = np.where(tabla_final['ÁREA'] == 'TOTAL GENERAL', 1, 0)
-tabla_final = tabla_final.sort_values(
-    by=["ORDEN_AREA", "ÁREA", "ORDEN_REGISTRO", "DEPARTAMENTO", "VENTA"], 
-    ascending=[True, True, True, True, False]
+# Capturar las áreas que puedan estar en los datos pero no en la lista original y combinarlas
+areas_presentes_extra = [a for a in tabla_final['ÁREA'].unique() if a not in orden_areas_personalizado and a != 'TOTAL GENERAL']
+lista_orden_final = orden_areas_personalizado + areas_presentes_extra + ['TOTAL GENERAL']
+
+# Forzar el orden categórico personalizado para la columna ÁREA
+tabla_final['ÁREA'] = pd.Categorical(
+    tabla_final['ÁREA'], 
+    categories=lista_orden_final, 
+    ordered=True
 )
 
-tabla_final = tabla_final.drop(columns=['M2', 'ORDEN_REGISTRO', 'ORDEN_AREA'])
+# Ordenar la matriz aplicando la prioridad establecida
+tabla_final = tabla_final.sort_values(
+    by=["ÁREA", "ORDEN_REGISTRO", "DEPARTAMENTO", "VENTA"], 
+    ascending=[True, True, True, False]
+)
+
+tabla_final = tabla_final.drop(columns=['M2', 'ORDEN_REGISTRO'])
 tabla_final = tabla_final[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'VENTA', 'META', 'AVANCE', 'EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)']]
 
 # Clon limpio con números reales para construir la exportación a Excel formulable
@@ -416,7 +441,7 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     for i, row in enumerate(dataframe.values):
         idx_fila = i + 1
         es_total_general = (row[1] == 'TOTAL GENERAL')
-        es_subtotal = (row[1] == 'TOTAL ÁREA')  # Condicional ajustado para pintar la fila correcta
+        es_subtotal = (row[1] == 'TOTAL ÁREA')  
         
         style_actual = cell_total_style if (es_subtotal or es_total_general) else cell_table_style
         
