@@ -99,8 +99,8 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas desde archivo externo local con lectura robusta
-    archivo_dist = "distribucion_miguel_2.csv"
+    # 1. Cargar el mapa de Áreas desde archivo externo local corregido a 'distribucion_miguel.csv'
+    archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
         st.stop()
@@ -116,7 +116,7 @@ def cargar_datos():
     df_dist.columns = df_dist.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
     
     if 'AREA' not in df_dist.columns:
-        st.error(f"❌ No se encontró la columna 'AREA' en el archivo {archivo_dist}. Las columnas encontradas son: {', '.join(df_dist.columns)}")
+        st.error(f"❌ No se encontró la columna 'AREA' o 'ÁREA' en el archivo {archivo_dist}. Las columnas encontradas son: {', '.join(df_dist.columns)}")
         st.stop()
 
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
@@ -252,7 +252,6 @@ df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel
 # PROCESAMIENTO MATRICIAL DE LOS DATOS
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
-# Asignamos el área al dataframe de M2 para que se cruce correctamente
 df_m2_sel['ÁREA'] = df_m2_sel['DEPARTAMENTO'].map(mapa_areas_global).fillna('SIN ÁREA')
 
 tabla_ant = df_año_anterior.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
@@ -275,7 +274,7 @@ tabla_base['AVANCE'] = np.where(tabla_base['META'] > 0, (tabla_base['VENTA'] / t
 tabla_base['EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)'] = np.where(tabla_base['M2'] > 0, tabla_base['VENTA'] / tabla_base['M2'], 0.0)
 tabla_base['ORDEN_REGISTRO'] = 0
 
-# Generación de Subtotales por Departamento (Ahora incluye el ÁREA)
+# Generación de Subtotales por Departamento
 subtotales = tabla_base.groupby(['ÁREA', 'DEPARTAMENTO'], observed=False).agg({'VENTA': 'sum', 'META': 'sum', 'M2': 'sum'}).reset_index()
 subtotales['CATEGORIA'] = 'TOTAL DEPARTAMENTO'
 subtotales['AVANCE'] = np.where(subtotales['META'] > 0, (subtotales['VENTA'] / subtotales['META']) * 100, 0.0)
@@ -372,7 +371,6 @@ def generar_excel_descarga_sumable(dataframe):
         formato_numero_excel = '#,##0.00'
         formato_porcentaje_excel = '0.00%'
         
-        # Ajustamos las letras de columnas ya que se agregó una nueva columna de texto
         for row in range(2, len(df_excel) + 2):
             worksheet[f'D{row}'].number_format = formato_numero_excel
             worksheet[f'E{row}'].number_format = formato_numero_excel
@@ -397,7 +395,6 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     story.append(Paragraph(f"Filtros aplicados - Ventas Totales: {ventas} | Meta Dinámica: {meta} | Avance: {avance} | EFICIENCIA EXHIBICION FRONTAL (VENTA/M2): {eficiencia}", subtitle_style))
     story.append(Spacer(1, 8))
     
-    # Se añade la columna ÁREA y se acorta visualmente la última columna para que encaje
     data_tabla = [[Paragraph("<b>ÁREA</b>", header_table_style), 
                    Paragraph("<b>DEPARTAMENTO</b>", header_table_style), 
                    Paragraph("<b>CATEGORÍA</b>", header_table_style), 
@@ -417,15 +414,15 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     
     for i, row in enumerate(dataframe.values):
         idx_fila = i + 1
-        es_total_general = (row[1] == 'TOTAL GENERAL')     # Ahora el Departamento está en el índice 1
-        es_subtotal = (row[2] == 'TOTAL DEPARTAMENTO')     # Ahora la Categoría está en el índice 2
+        es_total_general = (row[1] == 'TOTAL GENERAL')
+        es_subtotal = (row[2] == 'TOTAL DEPARTAMENTO')
         
         style_actual = cell_total_style if (es_subtotal or es_total_general) else cell_table_style
         
         data_tabla.append([
-            Paragraph(str(row[0]), style_actual),           # ÁREA
-            Paragraph(str(row[1]), style_actual),           # DEPARTAMENTO
-            Paragraph(str(row[2]), style_actual),           # CATEGORIA
+            Paragraph(str(row[0]), style_actual),
+            Paragraph(str(row[1]), style_actual),
+            Paragraph(str(row[2]), style_actual),
             Paragraph(formatear_moneda(row[3]), style_actual),
             Paragraph(formatear_moneda(row[4]), style_actual),
             Paragraph(formatear_porcentaje(row[5]), style_actual),
@@ -439,7 +436,6 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
             estilos_celdas.append(('BACKGROUND', (0, idx_fila), (-1, idx_fila), colors.HexColor('#D1FAE5')))
             estilos_celdas.append(('TEXTCOLOR', (0, idx_fila), (-1, idx_fila), colors.HexColor('#065F46')))
             
-    # Se ajustan los anchos para acomodar las 7 columnas dentro de los 680-700 puntos imprimibles
     pdf_table = Table(data_tabla, colWidths=[120, 130, 130, 80, 80, 60, 80])
     pdf_table.setStyle(TableStyle(estilos_celdas))
     story.append(pdf_table)
