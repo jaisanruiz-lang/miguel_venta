@@ -99,13 +99,26 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas desde archivo externo local
-    archivo_dist = "distribucion_miguel.csv"
+    # 1. Cargar el mapa de Áreas desde archivo externo local con lectura robusta
+    archivo_dist = "distribucion_miguel_2.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
         st.stop()
         
-    df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=";")
+    try:
+        df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=";")
+        if len(df_dist.columns) < 2:
+            df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=",")
+    except Exception:
+        df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=",")
+
+    df_dist.columns = df_dist.columns.str.strip().str.upper()
+    df_dist.columns = df_dist.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
+    
+    if 'AREA' not in df_dist.columns:
+        st.error(f"❌ No se encontró la columna 'AREA' en el archivo {archivo_dist}. Las columnas encontradas son: {', '.join(df_dist.columns)}")
+        st.stop()
+
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
