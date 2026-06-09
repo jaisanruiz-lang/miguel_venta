@@ -99,7 +99,7 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas desde archivo externo local corregido a 'distribucion_miguel.csv'
+    # 1. Cargar el mapa de Áreas y Departamentos desde el archivo de distribución de Miguel
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -122,7 +122,11 @@ def cargar_datos():
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
-    mapa_areas = dict(zip(df_dist['DEPARTAMENTO'], df_dist['AREA']))
+    df_dist['CATEGORIA'] = df_dist['CATEGORIA'].astype(str).str.strip().str.upper()
+    
+    # Crear diccionarios usando la CATEGORIA como llave maestra
+    mapa_areas_cat = dict(zip(df_dist['CATEGORIA'], df_dist['AREA']))
+    mapa_deps_cat = dict(zip(df_dist['CATEGORIA'], df_dist['DEPARTAMENTO']))
 
     # 2. Cargar Ventas con el link fijo de Drive y fallback al archivo local
     ID_DRIVE_VENTAS = "16XYtA31ebAE1Ad2Ldj7OV-CBbxO0IVSf" 
@@ -152,17 +156,28 @@ def cargar_datos():
     )
     df['ImporteDivisaPrincipal'] = pd.to_numeric(df['ImporteDivisaPrincipal'], errors='coerce').fillna(0.0)
     
-    df['Nombre'] = df['Nombre'].str.replace('SUCURSAL ', '', regex=False).str.upper().str.strip()
-    df['Nombre'] = df['Nombre'].replace({
+    df = df.rename(columns={
+        'ImporteDivisaPrincipal': 'VENTA',
+        'DescrLineaNegocio': 'CATEGORIA',
+        'Nombre': 'SUCURSAL'
+    })
+    
+    df['SUCURSAL'] = df['SUCURSAL'].str.replace('SUCURSAL ', '', regex=False).str.upper().str.strip()
+    df['SUCURSAL'] = df['SUCURSAL'].replace({
         'ALUMINIOLOGO WEB': 'ALUMUNIOLOGO WED',
         'SHOWROOM - 000': 'SHOWROOM'
     })
+    
+    df['CATEGORIA'] = df['CATEGORIA'].astype(str).str.strip().str.upper()
     
     if 'DEPARTAMENTO' in df.columns:
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].astype(str).str.strip().str.upper()
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
         
-    df['ÁREA'] = df['DEPARTAMENTO'].map(mapa_areas).fillna('SIN ÁREA')
+    # Asignar Jerarquía estricta según el archivo de distribución
+    df['ÁREA'] = df['CATEGORIA'].map(mapa_areas_cat).fillna('SIN ÁREA')
+    df['DEPARTAMENTO_NUEVO'] = df['CATEGORIA'].map(mapa_deps_cat)
+    df['DEPARTAMENTO'] = df['DEPARTAMENTO_NUEVO'].fillna(df['DEPARTAMENTO']).astype(str).str.strip().str.upper()
     
     # 3. Cargar Metros Cuadrados desde archivo externo local
     archivo_m2 = "METROS CUADRADOS POR CATEGORIA.csv"
@@ -173,10 +188,6 @@ def cargar_datos():
     df_m2 = pd.read_csv(archivo_m2, encoding="latin-1", sep=";")
     df_m2.columns = df_m2.columns.str.strip()
     
-    if 'DEPARTAMENTO' in df_m2.columns:
-        df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO'].ffill().astype(str).str.strip().str.upper()
-        df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
-        
     df_m2['CATEGORIA'] = df_m2['CATEGORIA'].astype(str).str.strip().str.upper()
     df_m2 = df_m2[(df_m2['CATEGORIA'] != 'NAN') & (df_m2['CATEGORIA'] != '')]
     
@@ -187,20 +198,21 @@ def cargar_datos():
         .str.replace(',', '.', regex=False)
     )
     df_m2['METROS'] = pd.to_numeric(df_m2['METROS'], errors='coerce').fillna(0.0)
+    
+    # Asignar Jerarquía estricta a los metros cuadrados
+    df_m2['ÁREA'] = df_m2['CATEGORIA'].map(mapa_areas_cat).fillna('SIN ÁREA')
+    if 'DEPARTAMENTO' in df_m2.columns:
+        df_m2['DEPARTAMENTO_NUEVO'] = df_m2['CATEGORIA'].map(mapa_deps_cat)
+        df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO_NUEVO'].fillna(df_m2['DEPARTAMENTO']).astype(str).str.strip().str.upper()
+    else:
+        df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('SIN DEPARTAMENTO')
         
-    return df, df_m2, mapa_areas
+    return df, df_m2
 
-df, df_m2, mapa_areas_global = cargar_datos()
-
-df = df.rename(columns={
-    'ImporteDivisaPrincipal': 'VENTA',
-    'DescrLineaNegocio': 'CATEGORIA',
-    'Nombre': 'SUCURSAL'
-})
-df['CATEGORIA'] = df['CATEGORIA'].astype(str).str.strip().str.upper()
+df, df_m2 = cargar_datos()
 
 # -----------------------------------
-# ESTRUCTURA DE ORDENAMIENTO ESTRICTO
+# ESTRUCTURA DE ORDENAMIENTO
 # -----------------------------------
 orden_meses = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 
                'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
@@ -208,19 +220,8 @@ orden_meses = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 orden_sucursales = ['CATIA', 'LA GUAIRA', 'MARICHE', 'GUATIRE', 'ALUMUNIOLOGO WED', 
                     'DISTRIBUIDORES', 'REPRESENTANTES COMERCIALES', 'SHOWROOM']
 
-orden_departamentos_base = [
-    'VENTANAS Y PUERTAS CORREDIZAS', 'VENTANAS ABATIBLES', 'DIVISIONES DE AMBIENTE',
-    'PERFILES ESTANDAR', 'PRODUCTOS ESTANDAR', 'PUERTAS EXTERIORES', 'PUERTAS INTERIORES',
-    'BARANDAS', 'PUERTAS DE BAÑO', 'VIDRIOS', 'SIL Y SELL', 'HERRAMIENTAS',
-    'IMPULSO', 'CERRADURAS Y CANDADOS', 'PERSIANAS Y MOSQUITEROS', 'LAMINAS'
-]
-
-otros_deps = [d for d in df['DEPARTAMENTO'].dropna().unique() if d not in orden_departamentos_base]
-orden_departamentos = orden_departamentos_base + otros_deps
-
 df['MES'] = pd.Categorical(df['MES'].astype(str).str.upper().str.strip(), categories=orden_meses, ordered=True)
 df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in orden_sucursales], ordered=True)
-df['DEPARTAMENTO'] = pd.Categorical(df['DEPARTAMENTO'], categories=orden_departamentos, ordered=True)
 
 # -----------------------------------
 # FILTROS (SIDEBAR LATERAL)
@@ -242,8 +243,7 @@ area_sel = st.sidebar.multiselect("Área (Agrupación)", sorted(areas_en_data), 
 
 df_areas_filtradas = df[df['ÁREA'].isin(area_sel)]
 departamentos_en_data = df_areas_filtradas['DEPARTAMENTO'].dropna().unique()
-departamentos_disponibles = [d for d in orden_departamentos if d in departamentos_en_data]
-departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
+departamentos_sel = st.sidebar.multiselect("Departamentos", sorted(departamentos_en_data), default=sorted(departamentos_en_data), placeholder="Seleccione Departamentos...")
 
 df_filtrado = df[(df['AÑO'] == año_sel) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
 df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
@@ -252,7 +252,6 @@ df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel
 # PROCESAMIENTO MATRICIAL DE LOS DATOS
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
-df_m2_sel['ÁREA'] = df_m2_sel['DEPARTAMENTO'].map(mapa_areas_global).fillna('SIN ÁREA')
 
 tabla_ant = df_año_anterior.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 tabla_ant = tabla_ant.rename(columns={'VENTA': 'META'})
@@ -274,9 +273,10 @@ tabla_base['AVANCE'] = np.where(tabla_base['META'] > 0, (tabla_base['VENTA'] / t
 tabla_base['EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)'] = np.where(tabla_base['M2'] > 0, tabla_base['VENTA'] / tabla_base['M2'], 0.0)
 tabla_base['ORDEN_REGISTRO'] = 0
 
-# Generación de Subtotales por Departamento
-subtotales = tabla_base.groupby(['ÁREA', 'DEPARTAMENTO'], observed=False).agg({'VENTA': 'sum', 'META': 'sum', 'M2': 'sum'}).reset_index()
-subtotales['CATEGORIA'] = 'TOTAL DEPARTAMENTO'
+# Generación de Subtotales por ÁREA
+subtotales = tabla_base.groupby(['ÁREA'], observed=False).agg({'VENTA': 'sum', 'META': 'sum', 'M2': 'sum'}).reset_index()
+subtotales['DEPARTAMENTO'] = 'TOTAL ÁREA'
+subtotales['CATEGORIA'] = '-'
 subtotales['AVANCE'] = np.where(subtotales['META'] > 0, (subtotales['VENTA'] / subtotales['META']) * 100, 0.0)
 subtotales['EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)'] = np.where(subtotales['M2'] > 0, subtotales['VENTA'] / subtotales['M2'], 0.0)
 subtotales['ORDEN_REGISTRO'] = 1
@@ -303,14 +303,14 @@ fila_total_general = pd.DataFrame([{
 # Unificación final de la matriz
 tabla_final = pd.concat([tabla_base, subtotales, fila_total_general], ignore_index=True)
 
-# Mantener orden estructural jerárquico y reordenar columnas
-tabla_final['DEPARTAMENTO'] = pd.Categorical(
-    tabla_final['DEPARTAMENTO'], 
-    categories=orden_departamentos + ['TOTAL GENERAL'], 
-    ordered=True
+# Crear orden dinámico agrupando jerárquicamente: Área > Departamento > Venta
+tabla_final['ORDEN_AREA'] = np.where(tabla_final['ÁREA'] == 'TOTAL GENERAL', 1, 0)
+tabla_final = tabla_final.sort_values(
+    by=["ORDEN_AREA", "ÁREA", "ORDEN_REGISTRO", "DEPARTAMENTO", "VENTA"], 
+    ascending=[True, True, True, True, False]
 )
-tabla_final = tabla_final.sort_values(by=["DEPARTAMENTO", "ORDEN_REGISTRO", "VENTA"], ascending=[True, True, False])
-tabla_final = tabla_final.drop(columns=['M2', 'ORDEN_REGISTRO'])
+
+tabla_final = tabla_final.drop(columns=['M2', 'ORDEN_REGISTRO', 'ORDEN_AREA'])
 tabla_final = tabla_final[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'VENTA', 'META', 'AVANCE', 'EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)']]
 
 # Clon limpio con números reales para construir la exportación a Excel formulable
@@ -335,7 +335,7 @@ df_render_app = df_render_app.rename(columns={
 def aplicar_colores_matriz(row):
     if row['DEPARTAMENTO'] == 'TOTAL GENERAL':
         return ['font-weight: bold; background-color: #A7F3D0; color: #047857; border-top: 2px double #047857; border-bottom: 2px double #047857;'] * len(row)
-    elif row['CATEGORÍA'] == 'TOTAL DEPARTAMENTO':
+    elif row['DEPARTAMENTO'] == 'TOTAL ÁREA':
         return ['font-weight: bold; background-color: #D1FAE5; color: #065F46; border-bottom: 2px solid #10B981;'] * len(row)
     return ['background-color: #FFFFFF; color: #1F2937; border-bottom: 1px solid #E5E7EB;'] * len(row)
 
@@ -359,7 +359,8 @@ eficiencia_total = total_g_eficiencia
 def generar_excel_descarga_sumable(dataframe):
     output = io.BytesIO()
     
-    df_excel = dataframe[dataframe['CATEGORIA'] != 'TOTAL DEPARTAMENTO'].copy()
+    # Se filtra la fila de subtotal con la nueva nomenclatura
+    df_excel = dataframe[dataframe['DEPARTAMENTO'] != 'TOTAL ÁREA'].copy()
     df_excel['AVANCE'] = df_excel['AVANCE'] / 100.0
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -415,7 +416,7 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     for i, row in enumerate(dataframe.values):
         idx_fila = i + 1
         es_total_general = (row[1] == 'TOTAL GENERAL')
-        es_subtotal = (row[2] == 'TOTAL DEPARTAMENTO')
+        es_subtotal = (row[1] == 'TOTAL ÁREA')  # Condicional ajustado para pintar la fila correcta
         
         style_actual = cell_total_style if (es_subtotal or es_total_general) else cell_table_style
         
