@@ -65,7 +65,8 @@ st.markdown("""
     }
     
     /* --- AGRANDAR EXCLUSIVAMENTE EL FONDO DEL FILTRO DE DEPARTAMENTOS --- */
-    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"]:nth-of-type(4) div[data-baseweb="select"] > div:first-child {
+    /* Apunta al 5to multiselect debido a la inclusión del nuevo filtro de Usuarios */
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"]:nth-of-type(5) div[data-baseweb="select"] > div:first-child {
         min-height: 300px !important;
         align-items: flex-start !important; 
         align-content: flex-start !important;
@@ -155,6 +156,14 @@ def cargar_datos():
         .str.replace(',', '.', regex=False)
     )
     df['ImporteDivisaPrincipal'] = pd.to_numeric(df['ImporteDivisaPrincipal'], errors='coerce').fillna(0.0)
+    
+    # Extracción de la columna Usuario
+    if 'Usuario' in df.columns:
+        df['USUARIO'] = df['Usuario'].astype(str).str.strip().str.upper()
+    elif 'USUARIO' in df.columns:
+        df['USUARIO'] = df['USUARIO'].astype(str).str.strip().str.upper()
+    else:
+        df['USUARIO'] = 'SIN USUARIO'
     
     df = df.rename(columns={
         'ImporteDivisaPrincipal': 'VENTA',
@@ -251,6 +260,10 @@ sucursales_en_data = df['SUCURSAL'].dropna().unique()
 sucursales_disponibles = [s for s in orden_sucursales if s in sucursales_en_data]
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 
+# --- NUEVO FILTRO: USUARIO ---
+usuarios_en_data = df['USUARIO'].dropna().unique()
+usuario_sel = st.sidebar.multiselect("Usuarios (Vendedores)", sorted(usuarios_en_data), default=sorted(usuarios_en_data), placeholder="Seleccione Usuarios...")
+
 # Ordenar las opciones del filtro según la jerarquía solicitada
 areas_en_data = df['ÁREA'].dropna().unique()
 areas_ordenadas_filtro = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
@@ -261,8 +274,9 @@ df_areas_filtradas = df[df['ÁREA'].isin(area_sel)]
 departamentos_en_data = df_areas_filtradas['DEPARTAMENTO'].dropna().unique()
 departamentos_sel = st.sidebar.multiselect("Departamentos", sorted(departamentos_en_data), default=sorted(departamentos_en_data), placeholder="Seleccione Departamentos...")
 
-df_filtrado = df[(df['AÑO'] == año_sel) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
-df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
+# Aplicación de todos los filtros al DataFrame
+df_filtrado = df[(df['AÑO'] == año_sel) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['USUARIO'].isin(usuario_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
+df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & (df['MES'].isin(meses_sel)) & (df['SUCURSAL'].isin(sucursal_sel)) & (df['USUARIO'].isin(usuario_sel)) & (df['DEPARTAMENTO'].isin(departamentos_sel)) & (df['ÁREA'].isin(area_sel))]
 
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL DE LOS DATOS
