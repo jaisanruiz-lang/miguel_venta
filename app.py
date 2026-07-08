@@ -242,43 +242,48 @@ df['MES'] = pd.Categorical(df['MES'].astype(str).str.upper().str.strip(), catego
 df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in orden_sucursales], ordered=True)
 
 # -----------------------------------
-# FILTROS EN CASCADA (SIDEBAR LATERAL)
+# FILTROS DINÁMICOS CON MEMORIA HISTÓRICA (LA SOLUCIÓN AL DESCUADRE)
 # -----------------------------------
 st.sidebar.header("Filtros de Análisis")
 
-# 1. Filtro Año
 año_sel = st.sidebar.selectbox("Año Seleccionado", sorted(df['AÑO'].dropna().unique(), reverse=True))
-df_año = df[df['AÑO'] == año_sel]
 
-# 2. Filtro Meses
-meses_en_data = df_año['MES'].dropna().unique()
-meses_disponibles = [m for m in orden_meses if m in meses_en_data]
+# 🔑 CLAVE DEL FIX: Para que la META X2 funcione perfectamente, los filtros por defecto 
+# deben construirse leyendo la información del año actual Y del año anterior.
+df_historico_filtro = df[df['AÑO'].isin([año_sel, año_sel - 1])]
+
+meses_disponibles = [m for m in orden_meses if m in df_historico_filtro['MES'].unique()]
 meses_sel = st.sidebar.multiselect("Meses", meses_disponibles, default=meses_disponibles, placeholder="Seleccione Meses...")
-df_mes = df_año[df_año['MES'].isin(meses_sel)]
 
-# 3. Filtro Sucursales
-sucursales_en_data = df_mes['SUCURSAL'].dropna().unique()
-sucursales_disponibles = [s for s in orden_sucursales if s in sucursales_en_data]
+df_historico_filtro = df_historico_filtro[df_historico_filtro['MES'].isin(meses_sel)]
+
+sucursales_disponibles = sorted(df_historico_filtro['SUCURSAL'].dropna().unique())
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
-df_suc = df_mes[df_mes['SUCURSAL'].isin(sucursal_sel)]
 
-# 4. Filtro Usuario (Vendedores)
-usuarios_en_data = df_suc['USUARIO'].dropna().unique()
-usuario_sel = st.sidebar.multiselect("Usuarios (Vendedores)", sorted(usuarios_en_data), default=sorted(usuarios_en_data), placeholder="Seleccione Usuarios...")
-df_us = df_suc[df_suc['USUARIO'].isin(usuario_sel)]
+df_historico_filtro = df_historico_filtro[df_historico_filtro['SUCURSAL'].isin(sucursal_sel)]
 
-# 5. Filtro Áreas
-areas_en_data = df_us['ÁREA'].dropna().unique()
-areas_ordenadas_filtro = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
-area_sel = st.sidebar.multiselect("Área (Agrupación)", areas_ordenadas_filtro, default=areas_ordenadas_filtro, placeholder="Seleccione Áreas...")
-df_ar = df_us[df_us['ÁREA'].isin(area_sel)]
+usuarios_disponibles = sorted(df_historico_filtro['USUARIO'].dropna().unique())
+usuario_sel = st.sidebar.multiselect("Usuarios (Vendedores)", usuarios_disponibles, default=usuarios_disponibles, placeholder="Seleccione Usuarios...")
 
-# 6. Filtro Departamentos
-departamentos_en_data = df_ar['DEPARTAMENTO'].dropna().unique()
-departamentos_sel = st.sidebar.multiselect("Departamentos", sorted(departamentos_en_data), default=sorted(departamentos_en_data), placeholder="Seleccione Departamentos...")
+df_historico_filtro = df_historico_filtro[df_historico_filtro['USUARIO'].isin(usuario_sel)]
+
+areas_en_data = df_historico_filtro['ÁREA'].dropna().unique()
+areas_disponibles = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
+area_sel = st.sidebar.multiselect("Área (Agrupación)", areas_disponibles, default=areas_disponibles, placeholder="Seleccione Áreas...")
+
+df_historico_filtro = df_historico_filtro[df_historico_filtro['ÁREA'].isin(area_sel)]
+
+departamentos_disponibles = sorted(df_historico_filtro['DEPARTAMENTO'].dropna().unique())
+departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
 
 # Aplicar el filtro final
-df_filtrado = df_ar[df_ar['DEPARTAMENTO'].isin(departamentos_sel)]
+df_filtrado = df[(df['AÑO'] == año_sel) & 
+                 (df['MES'].isin(meses_sel)) & 
+                 (df['SUCURSAL'].isin(sucursal_sel)) & 
+                 (df['USUARIO'].isin(usuario_sel)) & 
+                 (df['ÁREA'].isin(area_sel)) & 
+                 (df['DEPARTAMENTO'].isin(departamentos_sel))]
+
 df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & 
                      (df['MES'].isin(meses_sel)) & 
                      (df['SUCURSAL'].isin(sucursal_sel)) & 
