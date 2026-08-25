@@ -351,17 +351,34 @@ df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
 
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 
+# 🔑 CORRECCIÓN CRUCIAL: Usamos how='outer' para unir la matriz de metas completa sin perder categorías con presupuesto
 tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 if not tabla_meta_final.empty:
-    tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='left')
+    tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='outer')
 else:
     tabla_base['META'] = 0.0
+
+# Completar ÁREA y DEPARTAMENTO para categorías que solo vengan de la tabla de metas
+archivo_dist = "distribucion_miguel.csv"
+df_dist_temp = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python')
+df_dist_temp.columns = df_dist_temp.columns.str.strip().str.upper()
+df_dist_temp.columns = df_dist_temp.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
+df_dist_temp['AREA'] = df_dist_temp['AREA'].ffill().astype(str).str.strip().str.upper()
+df_dist_temp['DEPARTAMENTO'] = df_dist_temp['DEPARTAMENTO'].astype(str).str.strip().str.upper()
+df_dist_temp['CATEGORIA'] = df_dist_temp['CATEGORIA'].astype(str).str.strip().str.upper()
+mapa_areas_full = dict(zip(df_dist_temp['CATEGORIA'], df_dist_temp['AREA']))
+mapa_deps_full = dict(zip(df_dist_temp['CATEGORIA'], df_dist_temp['DEPARTAMENTO']))
+
+tabla_base['ÁREA'] = tabla_base['ÁREA'].fillna(tabla_base['CATEGORIA'].map(mapa_areas_full)).fillna('SIN ÁREA')
+tabla_base['DEPARTAMENTO'] = tabla_base['DEPARTAMENTO'].fillna(tabla_base['CATEGORIA'].map(mapa_deps_full)).fillna('SIN DEPARTAMENTO')
 
 tabla_base['VENTA'] = tabla_base['VENTA'].fillna(0.0)
 tabla_base['META'] = tabla_base['META'].fillna(0.0)
 tabla_base['METROS'] = tabla_base['METROS'].fillna(0.0)
 tabla_base = tabla_base.rename(columns={'METROS': 'M2'})
 
+# Filtrar según las áreas y departamentos seleccionados en el sidebar
+tabla_base = tabla_base[tabla_base['ÁREA'].isin(area_sel) & tabla_base['DEPARTAMENTO'].isin(departamentos_sel)]
 tabla_base = tabla_base[(tabla_base['VENTA'] > 0) | (tabla_base['META'] > 0) | (tabla_base['M2'] > 0)]
 
 tabla_base['AVANCE'] = np.where(tabla_base['META'] > 0, (tabla_base['VENTA'] / tabla_base['META']) * 100, 0.0)
