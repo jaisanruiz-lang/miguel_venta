@@ -367,13 +367,14 @@ else:
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE COMERCIAL PRINCIPAL
 # -----------------------------------
-df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
-df_m2_sel = df_m2_sel.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
-
+# TOMAR VENTAS COMO BASE PRINCIPAL PARA GARANTIZAR QUE NINGUNA CATEGORÍA SE PIERDA
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG'], observed=False)['VENTA'].sum().reset_index()
 tabla_actual = tabla_actual.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
 
-tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
+# Cruzar Metros Cuadrados y Metas sobre la base de Ventas (outer join)
+df_m2_agrupado = df_m2[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG', 'METROS']].rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
+tabla_base = pd.merge(tabla_actual, df_m2_agrupado, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
+
 if not tabla_meta_final.empty:
     tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='outer')
 else:
