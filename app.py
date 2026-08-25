@@ -65,7 +65,6 @@ st.markdown("""
     }
     
     /* --- AGRANDAR EXCLUSIVAMENTE EL FONDO DEL FILTRO DE DEPARTAMENTOS --- */
-    /* Apunta al 5to multiselect debido a la estructura actual de filtros */
     section[data-testid="stSidebar"] div[data-testid="stMultiSelect"]:nth-of-type(5) div[data-baseweb="select"] > div:first-child {
         min-height: 300px !important;
         align-items: flex-start !important; 
@@ -211,10 +210,59 @@ def cargar_datos():
         df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO_NUEVO'].fillna(df_m2['DEPARTAMENTO']).astype(str).str.strip().str.upper()
     else:
         df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('SIN DEPARTAMENTO')
-        
-    return df, df_m2
 
-df, df_m2 = cargar_datos()
+    # 4. Cargar Metas Globales (META_2026.csv) y Porcentajes por Categoría
+    archivo_meta_global = "META_2026.csv"
+    if os.path.exists(archivo_meta_global):
+        df_meta_g = pd.read_csv(archivo_meta_global, encoding="latin-1", sep=None, engine='python')
+        df_meta_g.columns = df_meta_g.columns.str.strip().str.upper()
+        # Normalizar nombres de columnas posibles
+        col_m_mes = [c for c in df_meta_g.columns if 'MES' in c][0] if [c for c in df_meta_g.columns if 'MES' in c] else 'MESES'
+        col_m_val = [c for c in df_meta_g.columns if 'META' in c][0]
+        col_m_suc = [c for c in df_meta_g.columns if 'SUCURSAL' in c][0]
+        col_m_ano = [c for c in df_meta_g.columns if 'AÑO' in c or 'AÃ' in c][0] if [c for c in df_meta_g.columns if 'AÑO' in c or 'AÃ' in c] else 'AÑO'
+        
+        df_meta_g = df_meta_g.rename(columns={col_m_mes: 'MES', col_m_val: 'META_GLOBAL', col_m_suc: 'SUCURSAL', col_m_ano: 'AÑO'})
+        df_meta_g['MES'] = df_meta_g['MES'].astype(str).str.strip().str.upper()
+        df_meta_g['SUCURSAL'] = df_meta_g['SUCURSAL'].astype(str).str.strip().str.upper()
+        df_meta_g['META_GLOBAL'] = (
+            df_meta_g['META_GLOBAL']
+            .astype(str)
+            .str.replace(r'\s+', '', regex=True)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False)
+        )
+        df_meta_g['META_GLOBAL'] = pd.to_numeric(df_meta_g['META_GLOBAL'], errors='coerce').fillna(0.0)
+    else:
+        df_meta_g = pd.DataFrame(columns=['MES', 'AÑO', 'SUCURSAL', 'META_GLOBAL'])
+
+    archivo_metas_pct = "METAS_POR_SUCURSAL_Y_CATEGORIA_PORCENTAJES.csv"
+    if os.path.exists(archivo_metas_pct):
+        df_metas_p = pd.read_csv(archivo_metas_pct, encoding="latin-1", sep=None, engine='python')
+        df_metas_p.columns = df_metas_p.columns.str.strip().str.upper()
+        col_p_cat = [c for c in df_metas_p.columns if 'CAT' in c][0]
+        col_p_por = [c for c in df_metas_p.columns if 'PORC' in c][0]
+        col_p_suc = [c for c in df_metas_p.columns if 'SUC' in c][0]
+        col_p_ano = [c for c in df_metas_p.columns if 'AÑO' in c or 'AÃ' in c][0] if [c for c in df_metas_p.columns if 'AÑO' in c or 'AÃ' in c] else 'AÑO'
+        
+        df_metas_p = df_metas_p.rename(columns={col_p_cat: 'CATEGORIA', col_p_por: 'PORCENTAJE', col_p_suc: 'SUCURSAL', col_p_ano: 'AÑO'})
+        df_metas_p['CATEGORIA'] = df_metas_p['CATEGORIA'].astype(str).str.strip().str.upper()
+        df_metas_p['SUCURSAL'] = df_metas_p['SUCURSAL'].astype(str).str.strip().str.upper()
+        df_metas_p['PORCENTAJE'] = (
+            df_metas_p['PORCENTAJE']
+            .astype(str)
+            .str.replace('%', '', regex=False)
+            .str.replace(r'\s+', '', regex=True)
+            .str.replace('.', '', regex=False)
+            .str.replace(',', '.', regex=False)
+        )
+        df_metas_p['PORCENTAJE'] = pd.to_numeric(df_metas_p['PORCENTAJE'], errors='coerce').fillna(0.0) / 100.0
+    else:
+        df_metas_p = pd.DataFrame(columns=['CATEGORIA', 'SUCURSAL', 'AÑO', 'PORCENTAJE'])
+        
+    return df, df_m2, df_meta_g, df_metas_p
+
+df, df_m2, df_meta_g, df_metas_p = cargar_datos()
 
 # -----------------------------------
 # ESTRUCTURA DE ORDENAMIENTO
@@ -242,68 +290,91 @@ df['MES'] = pd.Categorical(df['MES'].astype(str).str.upper().str.strip(), catego
 df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in orden_sucursales], ordered=True)
 
 # -----------------------------------
-# FILTROS DINÁMICOS CON MEMORIA HISTÓRICA (LA SOLUCIÓN AL DESCUADRE)
+# FILTROS DINÁMICOS EN CASCADA (SIDEBAR LATERAL)
 # -----------------------------------
 st.sidebar.header("Filtros de Análisis")
 
 año_sel = st.sidebar.selectbox("Año Seleccionado", sorted(df['AÑO'].dropna().unique(), reverse=True))
+df_año = df[df['AÑO'] == año_sel]
 
-# 🔑 CLAVE DEL FIX: Para que la META X2 funcione perfectamente, los filtros por defecto 
-# deben construirse leyendo la información del año actual Y del año anterior.
-df_historico_filtro = df[df['AÑO'].isin([año_sel, año_sel - 1])]
-
-meses_disponibles = [m for m in orden_meses if m in df_historico_filtro['MES'].unique()]
+meses_disponibles = [m for m in orden_meses if m in df_año['MES'].unique()]
 meses_sel = st.sidebar.multiselect("Meses", meses_disponibles, default=meses_disponibles, placeholder="Seleccione Meses...")
+df_mes = df_año[df_año['MES'].isin(meses_sel)]
 
-df_historico_filtro = df_historico_filtro[df_historico_filtro['MES'].isin(meses_sel)]
-
-sucursales_disponibles = sorted(df_historico_filtro['SUCURSAL'].dropna().unique())
+sucursales_disponibles = sorted(df_mes['SUCURSAL'].dropna().unique())
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
+df_suc = df_mes[df_mes['SUCURSAL'].isin(sucursal_sel)]
 
-df_historico_filtro = df_historico_filtro[df_historico_filtro['SUCURSAL'].isin(sucursal_sel)]
-
-usuarios_disponibles = sorted(df_historico_filtro['USUARIO'].dropna().unique())
+usuarios_disponibles = sorted(df_suc['USUARIO'].dropna().unique())
 usuario_sel = st.sidebar.multiselect("Usuarios (Vendedores)", usuarios_disponibles, default=usuarios_disponibles, placeholder="Seleccione Usuarios...")
+df_us = df_suc[df_suc['USUARIO'].isin(usuario_sel)]
 
-df_historico_filtro = df_historico_filtro[df_historico_filtro['USUARIO'].isin(usuario_sel)]
-
-areas_en_data = df_historico_filtro['ÁREA'].dropna().unique()
+areas_en_data = df_us['ÁREA'].dropna().unique()
 areas_disponibles = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
 area_sel = st.sidebar.multiselect("Área (Agrupación)", areas_disponibles, default=areas_disponibles, placeholder="Seleccione Áreas...")
+df_ar = df_us[df_us['ÁREA'].isin(area_sel)]
 
-df_historico_filtro = df_historico_filtro[df_historico_filtro['ÁREA'].isin(area_sel)]
-
-departamentos_disponibles = sorted(df_historico_filtro['DEPARTAMENTO'].dropna().unique())
+departamentos_disponibles = sorted(df_ar['DEPARTAMENTO'].dropna().unique())
 departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
 
-# Aplicar el filtro final
-df_filtrado = df[(df['AÑO'] == año_sel) & 
-                 (df['MES'].isin(meses_sel)) & 
-                 (df['SUCURSAL'].isin(sucursal_sel)) & 
-                 (df['USUARIO'].isin(usuario_sel)) & 
-                 (df['ÁREA'].isin(area_sel)) & 
-                 (df['DEPARTAMENTO'].isin(departamentos_sel))]
+# Aplicar el filtro final de ventas
+df_filtrado = df_ar[df_ar['DEPARTAMENTO'].isin(departamentos_sel)]
 
-df_año_anterior = df[(df['AÑO'] == (año_sel - 1)) & 
-                     (df['MES'].isin(meses_sel)) & 
-                     (df['SUCURSAL'].isin(sucursal_sel)) & 
-                     (df['USUARIO'].isin(usuario_sel)) & 
-                     (df['ÁREA'].isin(area_sel)) & 
-                     (df['DEPARTAMENTO'].isin(departamentos_sel))]
+# -----------------------------------
+# CÁLCULO DE LA META OFICIAL USANDO META_2026 Y PORCENTAJES
+# -----------------------------------
+# 1. Filtrar metas globales según año, meses y sucursales seleccionadas
+if not df_meta_g.empty:
+    df_meta_g_sel = df_meta_g[(df_meta_g['AÑO'] == año_sel) & (df_meta_g['MES'].isin(meses_sel)) & (df_meta_g['SUCURSAL'].isin(sucursal_sel))]
+    # Sumar la meta global total para el período seleccionado y las sucursales seleccionadas
+    meta_global_total = df_meta_g_sel['META_GLOBAL'].sum()
+else:
+    meta_global_total = 0.0
+
+# 2. Construir la tabla de metas por Categoría y Sucursal usando los porcentajes
+if not df_metas_p.empty:
+    df_metas_p_sel = df_metas_p[(df_metas_p['AÑO'] == año_sel) & (df_metas_p['SUCURSAL'].isin(sucursal_sel))].copy()
+    # Si tenemos metas mensuales globales y porcentajes anuales/mensuales, calculamos la meta por categoría y sucursal multiplicando la meta global de los meses seleccionados por los porcentajes
+    # Para hacerlo robusto y exacto: sumamos la meta global de los meses elegidos por sucursal
+    meta_por_sucursal = df_meta_g_sel.groupby('SUCURSAL')['META_GLOBAL'].sum().to_dict()
+    
+    # Calcular la meta en valor absoluto para cada registro de porcentaje
+    # Nota: Si el porcentaje ya está ponderado o es mensual, lo distribuimos
+    records_meta = []
+    for suc in sucursal_sel:
+        m_val = meta_por_sucursal.get(suc, 0.0)
+        df_s_pct = df_metas_p_sel[df_metas_p_sel['SUCURSAL'] == suc]
+        for _, row in df_s_pct.iterrows():
+            cat = row['CATEGORIA']
+            pct = row['PORCENTAJE']
+            records_meta.append({
+                'SUCURSAL': suc,
+                'CATEGORIA': cat,
+                'META_VALOR': m_val * pct
+            })
+    df_meta_calculada = pd.DataFrame(records_meta)
+    if not df_meta_calculada.empty:
+        tabla_meta_final = df_meta_calculada.groupby('CATEGORIA', as_index=False)['META_VALOR'].sum()
+        tabla_meta_final = tabla_meta_final.rename(columns={'META_VALOR': 'META'})
+    else:
+        tabla_meta_final = pd.DataFrame(columns=['CATEGORIA', 'META'])
+else:
+    tabla_meta_final = pd.DataFrame(columns=['CATEGORIA', 'META'])
 
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE COMERCIAL PRINCIPAL
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
 
-tabla_ant = df_año_anterior.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
-tabla_ant = tabla_ant.rename(columns={'VENTA': 'META'})
-tabla_ant['META'] = tabla_ant['META'] * 2
-
+# Ventas actuales agrupadas por ÁREA, DEPARTAMENTO, CATEGORÍA
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 
-tabla_ventas = pd.merge(tabla_actual, tabla_ant, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
-tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_ventas, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
+# Unir ventas con metros cuadrados y con las metas calculadas por categoría
+tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
+if not tabla_meta_final.empty:
+    tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='left')
+else:
+    tabla_base['META'] = 0.0
 
 tabla_base['VENTA'] = tabla_base['VENTA'].fillna(0.0)
 tabla_base['META'] = tabla_base['META'].fillna(0.0)
@@ -380,21 +451,28 @@ eficiencia_total = total_g_eficiencia
 
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE DE VENDEDORES
+# (Para los vendedores, distribuimos la meta de forma proporcional a sus ventas o según su participación por categoría)
 # -----------------------------------
-tabla_us_actual = df_filtrado.groupby(['USUARIO', 'ÁREA'], observed=False)['VENTA'].sum().reset_index()
-tabla_us_ant = df_año_anterior.groupby(['USUARIO', 'ÁREA'], observed=False)['VENTA'].sum().reset_index()
-tabla_us_ant = tabla_us_ant.rename(columns={'VENTA': 'META'})
-tabla_us_ant['META'] = tabla_us_ant['META'] * 2
+tabla_us_actual = df_filtrado.groupby(['USUARIO', 'ÁREA', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
+# Unimos con la meta por categoría
+if not tabla_meta_final.empty:
+    tabla_us_actual = pd.merge(tabla_us_actual, tabla_meta_final, on=['CATEGORIA'], how='left')
+else:
+    tabla_us_actual['META'] = 0.0
+tabla_us_actual['META'] = tabla_us_actual['META'].fillna(0.0)
 
-tabla_usuarios = pd.merge(tabla_us_actual, tabla_us_ant, on=['USUARIO', 'ÁREA'], how='outer')
-tabla_usuarios['VENTA'] = tabla_usuarios['VENTA'].fillna(0.0)
-tabla_usuarios['META'] = tabla_usuarios['META'].fillna(0.0)
-tabla_usuarios = tabla_usuarios[(tabla_usuarios['VENTA'] > 0) | (tabla_usuarios['META'] > 0)]
+# Para repartir la meta de la categoría entre los usuarios que vendieron en esa categoría de forma proporcional a sus ventas:
+total_ventas_cat = tabla_us_actual.groupby('CATEGORIA')['VENTA'].transform('sum')
+proporcion_usuario = np.where(total_ventas_cat > 0, tabla_us_actual['VENTA'] / total_ventas_cat, 0.0)
+tabla_us_actual['META_ASIGNADA'] = tabla_us_actual['META'] * proporcion_usuario
 
-tabla_usuarios['AVANCE'] = np.where(tabla_usuarios['META'] > 0, (tabla_usuarios['VENTA'] / tabla_usuarios['META']) * 100, 0.0)
-tabla_usuarios['ORDEN_REGISTRO'] = 0
+tabla_us_agrupado = tabla_us_actual.groupby(['USUARIO', 'ÁREA'], observed=False).agg({'VENTA': 'sum', 'META_ASIGNADA': 'sum'}).reset_index()
+tabla_us_agrupado = tabla_us_agrupado.rename(columns={'META_ASIGNADA': 'META'})
 
-subtotales_us = tabla_usuarios.groupby('USUARIO', observed=False).agg({'VENTA': 'sum', 'META': 'sum'}).reset_index()
+tabla_us_agrupado['AVANCE'] = np.where(tabla_us_agrupado['META'] > 0, (tabla_us_agrupado['VENTA'] / tabla_us_agrupado['META']) * 100, 0.0)
+tabla_us_agrupado['ORDEN_REGISTRO'] = 0
+
+subtotales_us = tabla_us_agrupado.groupby('USUARIO', observed=False).agg({'VENTA': 'sum', 'META': 'sum'}).reset_index()
 subtotales_us['ÁREA'] = 'TOTAL VENDEDOR'
 subtotales_us['AVANCE'] = np.where(subtotales_us['META'] > 0, (subtotales_us['VENTA'] / subtotales_us['META']) * 100, 0.0)
 subtotales_us['ORDEN_REGISTRO'] = 1
@@ -412,7 +490,7 @@ total_us = pd.DataFrame([{
     'ORDEN_REGISTRO': 2
 }])
 
-tabla_us_final = pd.concat([tabla_usuarios, subtotales_us, total_us], ignore_index=True)
+tabla_us_final = pd.concat([tabla_us_agrupado, subtotales_us, total_us], ignore_index=True)
 tabla_us_final = tabla_us_final.sort_values(by=["USUARIO", "ORDEN_REGISTRO", "VENTA"], ascending=[True, True, False])
 tabla_us_final = tabla_us_final.drop(columns=['ORDEN_REGISTRO'])
 df_para_excel_us = tabla_us_final.copy()
@@ -422,7 +500,6 @@ df_para_excel_us = tabla_us_final.copy()
 # -----------------------------------
 def generar_excel_descarga_sumable(dataframe, sheet_name='Reporte'):
     output = io.BytesIO()
-    # Se filtran las filas de subtotales para operaciones limpias en Excel
     df_excel = dataframe.copy()
     if 'DEPARTAMENTO' in df_excel.columns:
         df_excel = df_excel[df_excel['DEPARTAMENTO'] != 'TOTAL ÁREA']
@@ -463,7 +540,7 @@ def generar_pdf_descarga(dataframe, año, ventas, meta, avance, eficiencia):
     cell_total_style = ParagraphStyle('CellTotal', parent=styles['Normal'], fontSize=8, leading=10, fontName='Helvetica-Bold', alignment=2)
     
     story.append(Paragraph(f"<b>REPORTE EJECUTIVO COMERCIAL - AÑO {año}</b>", title_style))
-    story.append(Paragraph(f"Filtros aplicados - Ventas Totales: {ventas} | Meta Dinámica: {meta} | Avance: {avance} | EFICIENCIA (VENTA/M2): {eficiencia}", subtitle_style))
+    story.append(Paragraph(f"Filtros aplicados - Ventas Totales: {ventas} | Meta Oficial: {meta} | Avance: {avance} | EFICIENCIA (VENTA/M2): {eficiencia}", subtitle_style))
     story.append(Spacer(1, 8))
     
     data_tabla = [[Paragraph("<b>ÁREA</b>", header_table_style), 
@@ -579,7 +656,7 @@ with st.expander("📊 ANÁLISIS - KPIs DE VENTAS", expanded=True):
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("VENTAS TOTALES", formatear_moneda(total_ventas))
-    col2.metric("META FIJADA (X2)", formatear_moneda(meta_dinamica_total))
+    col2.metric("META OFICIAL", formatear_moneda(meta_dinamica_total))
     col3.metric("PORCENTAJE DE AVANCE", formatear_porcentaje(avance_general))
     col4.metric("EFICIENCIA EXHIBICION FRONTAL (VENTA/M2)", formatear_moneda(eficiencia_total))
 
