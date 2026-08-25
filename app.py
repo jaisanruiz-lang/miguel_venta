@@ -94,7 +94,7 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas y Departamentos
+    # 1. Cargar el mapa de Áreas y Departamentos actualizado
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -175,9 +175,9 @@ def cargar_datos():
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].astype(str).str.strip().str.upper()
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
         
-    df['ÁREA'] = df['CATEGORIA'].map(mapa_areas_cat).fillna('SIN ÁREA')
+    df['ÁREA'] = df['CATEGORIA'].map(mapa_areas_cat).fillna('OTROS')
     df['DEPARTAMENTO_NUEVO'] = df['CATEGORIA'].map(mapa_deps_cat)
-    df['DEPARTAMENTO'] = df['DEPARTAMENTO_NUEVO'].fillna(df['DEPARTAMENTO']).astype(str).str.strip().str.upper()
+    df['DEPARTAMENTO'] = df['DEPARTAMENTO_NUEVO'].fillna(df['DEPARTAMENTO']).fillna('OTRAS CATEGORIAS').astype(str).str.strip().str.upper()
     
     # 3. Cargar Metros Cuadrados
     archivo_m2 = "METROS CUADRADOS POR CATEGORIA.csv"
@@ -198,12 +198,12 @@ def cargar_datos():
     )
     df_m2['METROS'] = pd.to_numeric(df_m2['METROS'], errors='coerce').fillna(0.0)
     
-    df_m2['ÁREA'] = df_m2['CATEGORIA'].map(mapa_areas_cat).fillna('SIN ÁREA')
+    df_m2['ÁREA'] = df_m2['CATEGORIA'].map(mapa_areas_cat).fillna('OTROS')
     if 'DEPARTAMENTO' in df_m2.columns:
         df_m2['DEPARTAMENTO_NUEVO'] = df_m2['CATEGORIA'].map(mapa_deps_cat)
-        df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO_NUEVO'].fillna(df_m2['DEPARTAMENTO']).astype(str).str.strip().str.upper()
+        df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO_NUEVO'].fillna(df_m2['DEPARTAMENTO']).fillna('OTRAS CATEGORIAS').astype(str).str.strip().str.upper()
     else:
-        df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('SIN DEPARTAMENTO')
+        df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('OTRAS CATEGORIAS')
 
     # 4. Cargar Tablas Maestras de Metas (META_2026.csv y Porcentajes)
     archivo_meta_global = "META_2026.csv"
@@ -288,13 +288,17 @@ df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in o
 st.sidebar.header("Filtros de Análisis")
 
 año_sel = st.sidebar.selectbox("Año Seleccionado", sorted(df['AÑO'].dropna().unique(), reverse=True))
-df_año = df[df['AÑO'] == año_sel]
 
-meses_disponibles = [m for m in orden_meses if m in df_año['MES'].unique()]
+meses_disponibles = orden_meses
 meses_sel = st.sidebar.multiselect("Meses", meses_disponibles, default=meses_disponibles, placeholder="Seleccione Meses...")
+
+df_año = df[df['AÑO'] == año_sel]
 df_mes = df_año[df_año['MES'].isin(meses_sel)]
 
 sucursales_disponibles = sorted(df_mes['SUCURSAL'].dropna().unique())
+if not sucursales_disponibles and not df_meta_g.empty:
+    sucursales_disponibles = sorted(df_meta_g['SUCURSAL'].dropna().unique())
+
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 df_suc = df_mes[df_mes['SUCURSAL'].isin(sucursal_sel)]
 
@@ -351,14 +355,12 @@ df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
 
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 
-# 🔑 FUSIÓN COMPLETA (OUTER JOIN) PARA INCLUIR TODAS LAS CATEGORÍAS PRESUPUESTADAS
 tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 if not tabla_meta_final.empty:
     tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='outer')
 else:
     tabla_base['META'] = 0.0
 
-# Completar ÁREA y DEPARTAMENTO para categorías que solo vengan de la tabla de metas o ventas
 archivo_dist = "distribucion_miguel.csv"
 df_dist_temp = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python')
 df_dist_temp.columns = df_dist_temp.columns.str.strip().str.upper()
