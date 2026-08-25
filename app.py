@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import io
+import unicodedata
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -73,7 +74,7 @@ st.markdown("""
 st.markdown('<h1 class="main-title">📊 DASHBOARD COMERCIAL</h1>', unsafe_allow_html=True)
 
 # -----------------------------------
-# FUNCIONES DE FORMATEO REGIONAL
+# FUNCIONES DE FORMATEO Y NORMALIZACIÓN
 # -----------------------------------
 def formatear_moneda(valor):
     if pd.isna(valor):
@@ -89,6 +90,15 @@ def formatear_porcentaje(valor):
     tabla_cambio = str.maketrans({',': '.', '.': ','})
     return f"{base.translate(tabla_cambio)} %"
 
+def normalizar_texto(texto):
+    if pd.isna(texto):
+        return ""
+    # Normaliza tildes y caracteres especiales, unificando Ñ y N si es necesario
+    t = str(texto).strip().upper()
+    t = t.replace('Ã±', 'Ñ').replace('Ã‘', 'Ñ').replace('BAÑOS', 'BANOS').replace('BAÑO', 'BANO')
+    nfkd_form = unicodedata.normalize('NFKD', t)
+    return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
 # -----------------------------------
 # CARGA Y LIMPIEZA DE DATA (CACHE + GOOGLE DRIVE / LOCAL)
 # -----------------------------------
@@ -97,30 +107,25 @@ def cargar_datos():
     # 1. Cargar el mapa de Áreas y Departamentos
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
-        st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
+        st.error(f"No se encontró el archivo '{archivo_dist}'.")
         st.stop()
         
     try:
-        df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=";")
-        if len(df_dist.columns) < 2:
-            df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=",")
-    except Exception:
-        df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=",")
-
-    df_dist.columns = df_dist.columns.str.strip().str.upper()
-    df_dist.columns = df_dist.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
-    
-    if 'AREA' not in df_dist.columns:
-        st.error(f"❌ No se encontró la columna 'AREA' o 'ÁREA' en el archivo {archivo_dist}.")
+        df_dist = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
+    except Exception as e:
+        st.error(f"❌ Error al leer '{archivo_dist}': {e}")
         st.stop()
 
+    df_dist.columns = df_dist.columns.str.strip().str.upper()
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
     df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].astype(str).str.strip().str.upper()
-    df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
     df_dist['CATEGORIA'] = df_dist['CATEGORIA'].astype(str).str.strip().str.upper()
     
-    mapa_areas_cat = dict(zip(df_dist['CATEGORIA'], df_dist['AREA']))
-    mapa_deps_cat = dict(zip(df_dist['CATEGORIA'], df_dist['DEPARTAMENTO']))
+    # Llave normalizada para evitar conflictos de Ñ / tildes
+    df_dist['CAT_NORM'] = df_dist['CATEGORIA'].apply(normalizar_texto)
+    
+    mapa_areas_cat = dict(zip(df_dist['CAT_NORM'], df_dist['AREA']))
+    mapa_deps_cat = dict(zip(df_dist['CAT_NORM'], df_dist['DEPARTAMENTO']))
 
     # 2. Cargar Ventas
     ID_DRIVE_VENTAS = "16XYtA31ebAE1Ad2Ldj7OV-CBbxO0IVSf" 
@@ -130,7 +135,7 @@ def cargar_datos():
         df = pd.read_csv(URL_VENTAS_NUBE, encoding="latin-1", sep=";")
     except Exception:
         try:
-            df = pd.read_csv("ventas.csv", encoding="latin-1", sep=";")
+            df = pd.read_csv("ventas.csv", encoding="latin-1", sep=";", on_bad_lines='skip')
         except Exception as e_local:
             st.error(f"❌ Error al cargar las Ventas. Detalles: {e_local}")
             st.stop()
@@ -169,14 +174,14 @@ def cargar_datos():
         'SHOWROOM - 000': 'SHOWROOM'
     })
     
-    df['CATEGORIA'] = df['CATEGORIA'].astype(str).str.strip().str.upper()
+    df['CATEGORIA_ORIG'] = df['CATEGORIA'].astype(str).str.strip().str.upper()
+    df['CAT_NORM'] = df['CATEGORIA_ORIG'].apply(normalizar_texto)
     
     if 'DEPARTAMENTO' in df.columns:
         df['DEPARTAMENTO'] = df['DEPARTAMENTO'].astype(str).str.strip().str.upper()
-        df['DEPARTAMENTO'] = df['DEPARTAMENTO'].str.replace('BAÃ\x91O', 'BAÑO', regex=False)
         
-    df['ÁREA'] = df['CATEGORIA'].map(mapa_areas_cat).fillna('OTROS')
-    df['DEPARTAMENTO_NUEVO'] = df['CATEGORIA'].map(mapa_deps_cat)
+    df['ÁREA'] = df['CAT_NORM'].map(mapa_areas_cat).fillna('OTROS')
+    df['DEPARTAMENTO_NUEVO'] = df['CAT_NORM'].map(mapa_deps_cat)
     df['DEPARTAMENTO'] = df['DEPARTAMENTO_NUEVO'].fillna(df['DEPARTAMENTO']).fillna('OTRAS CATEGORIAS').astype(str).str.strip().str.upper()
     
     # 3. Cargar Metros Cuadrados
@@ -185,10 +190,11 @@ def cargar_datos():
         st.error(f"No se encontró el archivo '{archivo_m2}'.")
         st.stop()
         
-    df_m2 = pd.read_csv(archivo_m2, encoding="latin-1", sep=";")
-    df_m2.columns = df_m2.columns.str.strip()
-    df_m2['CATEGORIA'] = df_m2['CATEGORIA'].astype(str).str.strip().str.upper()
-    df_m2 = df_m2[(df_m2['CATEGORIA'] != 'NAN') & (df_m2['CATEGORIA'] != '')]
+    df_m2 = pd.read_csv(archivo_m2, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
+    df_m2.columns = df_m2.columns.str.strip().str.upper()
+    df_m2['CATEGORIA_ORIG'] = df_m2['CATEGORIA'].astype(str).str.strip().str.upper()
+    df_m2['CAT_NORM'] = df_m2['CATEGORIA_ORIG'].apply(normalizar_texto)
+    df_m2 = df_m2[(df_m2['CAT_NORM'] != 'NAN') & (df_m2['CAT_NORM'] != '')]
     
     df_m2['METROS'] = (
         df_m2['METROS']
@@ -198,17 +204,17 @@ def cargar_datos():
     )
     df_m2['METROS'] = pd.to_numeric(df_m2['METROS'], errors='coerce').fillna(0.0)
     
-    df_m2['ÁREA'] = df_m2['CATEGORIA'].map(mapa_areas_cat).fillna('OTROS')
+    df_m2['ÁREA'] = df_m2['CAT_NORM'].map(mapa_areas_cat).fillna('OTROS')
     if 'DEPARTAMENTO' in df_m2.columns:
-        df_m2['DEPARTAMENTO_NUEVO'] = df_m2['CATEGORIA'].map(mapa_deps_cat)
+        df_m2['DEPARTAMENTO_NUEVO'] = df_m2['CAT_NORM'].map(mapa_deps_cat)
         df_m2['DEPARTAMENTO'] = df_m2['DEPARTAMENTO_NUEVO'].fillna(df_m2['DEPARTAMENTO']).fillna('OTRAS CATEGORIAS').astype(str).str.strip().str.upper()
     else:
-        df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('OTRAS CATEGORIAS')
+        df_m2['DEPARTAMENTO'] = df_m2['CAT_NORM'].map(mapa_deps_cat).fillna('OTRAS CATEGORIAS')
 
     # 4. Cargar Tablas Maestras de Metas (META_2026.csv y Porcentajes)
     archivo_meta_global = "META_2026.csv"
     if os.path.exists(archivo_meta_global):
-        df_meta_g = pd.read_csv(archivo_meta_global, encoding="latin-1", sep=None, engine='python')
+        df_meta_g = pd.read_csv(archivo_meta_global, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
         df_meta_g.columns = df_meta_g.columns.str.strip().str.upper()
         col_m_mes = [c for c in df_meta_g.columns if 'MES' in c][0] if [c for c in df_meta_g.columns if 'MES' in c] else 'MESES'
         col_m_val = [c for c in df_meta_g.columns if 'META' in c][0]
@@ -231,7 +237,7 @@ def cargar_datos():
 
     archivo_metas_pct = "METAS_POR_SUCURSAL_Y_CATEGORIA_PORCENTAJES.csv"
     if os.path.exists(archivo_metas_pct):
-        df_metas_p = pd.read_csv(archivo_metas_pct, encoding="latin-1", sep=None, engine='python')
+        df_metas_p = pd.read_csv(archivo_metas_pct, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
         df_metas_p.columns = df_metas_p.columns.str.strip().str.upper()
         col_p_cat = [c for c in df_metas_p.columns if 'CAT' in c][0]
         col_p_por = [c for c in df_metas_p.columns if 'PORC' in c][0]
@@ -239,8 +245,10 @@ def cargar_datos():
         col_p_ano = [c for c in df_metas_p.columns if 'AÑO' in c or 'AÃ' in c][0] if [c for c in df_metas_p.columns if 'AÑO' in c or 'AÃ' in c] else 'AÑO'
         
         df_metas_p = df_metas_p.rename(columns={col_p_cat: 'CATEGORIA', col_p_por: 'PORCENTAJE', col_p_suc: 'SUCURSAL', col_p_ano: 'AÑO'})
-        df_metas_p['CATEGORIA'] = df_metas_p['CATEGORIA'].astype(str).str.strip().str.upper()
         df_metas_p['SUCURSAL'] = df_metas_p['SUCURSAL'].astype(str).str.strip().str.upper()
+        df_metas_p['CATEGORIA_ORIG'] = df_metas_p['CATEGORIA'].astype(str).str.strip().str.upper()
+        df_metas_p['CAT_NORM'] = df_metas_p['CATEGORIA_ORIG'].apply(normalizar_texto)
+        
         df_metas_p['PORCENTAJE'] = (
             df_metas_p['PORCENTAJE']
             .astype(str)
@@ -251,10 +259,10 @@ def cargar_datos():
         )
         df_metas_p['PORCENTAJE'] = pd.to_numeric(df_metas_p['PORCENTAJE'], errors='coerce').fillna(0.0) / 100.0
         
-        # 🔑 NORMALIZACIÓN EXACTA: Asegurar que los porcentajes por sucursal sumen exactamente 1.0
+        # Normalización exacta por sucursal
         df_metas_p['PORCENTAJE'] = df_metas_p.groupby('SUCURSAL')['PORCENTAJE'].transform(lambda x: x / x.sum())
     else:
-        df_metas_p = pd.DataFrame(columns=['CATEGORIA', 'SUCURSAL', 'AÑO', 'PORCENTAJE'])
+        df_metas_p = pd.DataFrame(columns=['CATEGORIA_ORIG', 'CAT_NORM', 'SUCURSAL', 'AÑO', 'PORCENTAJE'])
         
     return df, df_m2, df_meta_g, df_metas_p
 
@@ -335,17 +343,17 @@ if not df_metas_p.empty:
         m_val = meta_por_sucursal.get(suc, 0.0)
         df_s_pct = df_metas_p_sel[df_metas_p_sel['SUCURSAL'] == suc]
         for _, row in df_s_pct.iterrows():
-            cat = row['CATEGORIA']
+            cat_orig = row['CATEGORIA_ORIG']
             pct = row['PORCENTAJE']
             records_meta.append({
                 'SUCURSAL': suc,
-                'CATEGORIA': cat,
+                'CATEGORIA_ORIG': cat_orig,
                 'META_VALOR': m_val * pct
             })
     df_meta_calculada = pd.DataFrame(records_meta)
     if not df_meta_calculada.empty:
-        tabla_meta_final = df_meta_calculada.groupby('CATEGORIA', as_index=False)['META_VALOR'].sum()
-        tabla_meta_final = tabla_meta_final.rename(columns={'META_VALOR': 'META'})
+        tabla_meta_final = df_meta_calculada.groupby('CATEGORIA_ORIG', as_index=False)['META_VALOR'].sum()
+        tabla_meta_final = tabla_meta_final.rename(columns={'META_VALOR': 'META', 'CATEGORIA_ORIG': 'CATEGORIA'})
     else:
         tabla_meta_final = pd.DataFrame(columns=['CATEGORIA', 'META'])
 else:
@@ -355,8 +363,10 @@ else:
 # PROCESAMIENTO MATRICIAL: REPORTE COMERCIAL PRINCIPAL
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
+df_m2_sel = df_m2_sel.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
 
-tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
+tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG'], observed=False)['VENTA'].sum().reset_index()
+tabla_actual = tabla_actual.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
 
 tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 if not tabla_meta_final.empty:
@@ -365,17 +375,19 @@ else:
     tabla_base['META'] = 0.0
 
 archivo_dist = "distribucion_miguel.csv"
-df_dist_temp = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python')
+df_dist_temp = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
 df_dist_temp.columns = df_dist_temp.columns.str.strip().str.upper()
-df_dist_temp.columns = df_dist_temp.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
 df_dist_temp['AREA'] = df_dist_temp['AREA'].ffill().astype(str).str.strip().str.upper()
 df_dist_temp['DEPARTAMENTO'] = df_dist_temp['DEPARTAMENTO'].astype(str).str.strip().str.upper()
 df_dist_temp['CATEGORIA'] = df_dist_temp['CATEGORIA'].astype(str).str.strip().str.upper()
-mapa_areas_full = dict(zip(df_dist_temp['CATEGORIA'], df_dist_temp['AREA']))
-mapa_deps_full = dict(zip(df_dist_temp['CATEGORIA'], df_dist_temp['DEPARTAMENTO']))
+df_dist_temp['CAT_NORM'] = df_dist_temp['CATEGORIA'].apply(normalizar_texto)
 
-tabla_base['ÁREA'] = tabla_base['ÁREA'].fillna(tabla_base['CATEGORIA'].map(mapa_areas_full)).fillna('OTROS')
-tabla_base['DEPARTAMENTO'] = tabla_base['DEPARTAMENTO'].fillna(tabla_base['CATEGORIA'].map(mapa_deps_full)).fillna('OTRAS CATEGORIAS')
+mapa_areas_full = dict(zip(df_dist_temp['CAT_NORM'], df_dist_temp['AREA']))
+mapa_deps_full = dict(zip(df_dist_temp['CAT_NORM'], df_dist_temp['DEPARTAMENTO']))
+
+tabla_base['CAT_NORM'] = tabla_base['CATEGORIA'].apply(normalizar_texto)
+tabla_base['ÁREA'] = tabla_base['ÁREA'].fillna(tabla_base['CAT_NORM'].map(mapa_areas_full)).fillna('OTROS')
+tabla_base['DEPARTAMENTO'] = tabla_base['DEPARTAMENTO'].fillna(tabla_base['CAT_NORM'].map(mapa_deps_full)).fillna('OTRAS CATEGORIAS')
 
 tabla_base['VENTA'] = tabla_base['VENTA'].fillna(0.0)
 tabla_base['META'] = tabla_base['META'].fillna(0.0)
@@ -414,7 +426,7 @@ fila_total_general = pd.DataFrame([{
     'ORDEN_REGISTRO': 2
 }])
 
-tabla_final = pd.concat([tabla_base, subtotales, fila_total_general], ignore_index=True)
+tabla_final = pd.concat([tabla_base.drop(columns=['CAT_NORM']), subtotales, fila_total_general], ignore_index=True)
 
 areas_presentes_extra = [a for a in tabla_final['ÁREA'].unique() if a not in orden_areas_personalizado and a != 'TOTAL GENERAL']
 lista_orden_final = orden_areas_personalizado + areas_presentes_extra + ['TOTAL GENERAL']
@@ -454,7 +466,9 @@ eficiencia_total = total_g_eficiencia
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE DE VENDEDORES
 # -----------------------------------
-tabla_us_actual = df_filtrado.groupby(['USUARIO', 'ÁREA', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
+tabla_us_actual = df_filtrado.groupby(['USUARIO', 'ÁREA', 'CATEGORIA_ORIG'], observed=False)['VENTA'].sum().reset_index()
+tabla_us_actual = tabla_us_actual.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
+
 if not tabla_meta_final.empty:
     tabla_us_actual = pd.merge(tabla_us_actual, tabla_meta_final, on=['CATEGORIA'], how='left')
 else:
