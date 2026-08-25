@@ -93,7 +93,6 @@ def formatear_porcentaje(valor):
 def normalizar_texto(texto):
     if pd.isna(texto):
         return ""
-    # Normaliza tildes y caracteres especiales, unificando Ñ y N si es necesario
     t = str(texto).strip().upper()
     t = t.replace('Ã±', 'Ñ').replace('Ã‘', 'Ñ').replace('BAÑOS', 'BANOS').replace('BAÑO', 'BANO')
     nfkd_form = unicodedata.normalize('NFKD', t)
@@ -117,11 +116,15 @@ def cargar_datos():
         st.stop()
 
     df_dist.columns = df_dist.columns.str.strip().str.upper()
-    df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
-    df_dist['DEPARTAMENTO'] = df_dist['DEPARTAMENTO'].astype(str).str.strip().str.upper()
-    df_dist['CATEGORIA'] = df_dist['CATEGORIA'].astype(str).str.strip().str.upper()
     
-    # Llave normalizada para evitar conflictos de Ñ / tildes
+    # Detección flexible de la columna ÁREA (con o sin tilde)
+    col_area_dist = 'ÁREA' if 'ÁREA' in df_dist.columns else ('AREA' if 'AREA' in df_dist.columns else df_dist.columns[0])
+    col_dep_dist = 'DEPARTAMENTO' if 'DEPARTAMENTO' in df_dist.columns else df_dist.columns[1]
+    col_cat_dist = 'CATEGORIA' if 'CATEGORIA' in df_dist.columns else df_dist.columns[2]
+
+    df_dist['AREA'] = df_dist[col_area_dist].ffill().astype(str).str.strip().str.upper()
+    df_dist['DEPARTAMENTO'] = df_dist[col_dep_dist].astype(str).str.strip().str.upper()
+    df_dist['CATEGORIA'] = df_dist[col_cat_dist].astype(str).str.strip().str.upper()
     df_dist['CAT_NORM'] = df_dist['CATEGORIA'].apply(normalizar_texto)
     
     mapa_areas_cat = dict(zip(df_dist['CAT_NORM'], df_dist['AREA']))
@@ -377,9 +380,14 @@ else:
 archivo_dist = "distribucion_miguel.csv"
 df_dist_temp = pd.read_csv(archivo_dist, encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
 df_dist_temp.columns = df_dist_temp.columns.str.strip().str.upper()
-df_dist_temp['AREA'] = df_dist_temp['AREA'].ffill().astype(str).str.strip().str.upper()
-df_dist_temp['DEPARTAMENTO'] = df_dist_temp['DEPARTAMENTO'].astype(str).str.strip().str.upper()
-df_dist_temp['CATEGORIA'] = df_dist_temp['CATEGORIA'].astype(str).str.strip().str.upper()
+
+col_area_t = 'ÁREA' if 'ÁREA' in df_dist_temp.columns else ('AREA' if 'AREA' in df_dist_temp.columns else df_dist_temp.columns[0])
+col_dep_t = 'DEPARTAMENTO' if 'DEPARTAMENTO' in df_dist_temp.columns else df_dist_temp.columns[1]
+col_cat_t = 'CATEGORIA' if 'CATEGORIA' in df_dist_temp.columns else df_dist_temp.columns[2]
+
+df_dist_temp['AREA'] = df_dist_temp[col_area_t].ffill().astype(str).str.strip().str.upper()
+df_dist_temp['DEPARTAMENTO'] = df_dist_temp[col_dep_t].astype(str).str.strip().str.upper()
+df_dist_temp['CATEGORIA'] = df_dist_temp[col_cat_t].astype(str).str.strip().str.upper()
 df_dist_temp['CAT_NORM'] = df_dist_temp['CATEGORIA'].apply(normalizar_texto)
 
 mapa_areas_full = dict(zip(df_dist_temp['CAT_NORM'], df_dist_temp['AREA']))
