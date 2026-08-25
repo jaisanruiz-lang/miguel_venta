@@ -94,7 +94,7 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas y Departamentos actualizado
+    # 1. Cargar el mapa de Áreas y Departamentos
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -250,6 +250,9 @@ def cargar_datos():
             .str.replace(',', '.', regex=False)
         )
         df_metas_p['PORCENTAJE'] = pd.to_numeric(df_metas_p['PORCENTAJE'], errors='coerce').fillna(0.0) / 100.0
+        
+        # 🔑 NORMALIZACIÓN EXACTA: Asegurar que los porcentajes por sucursal sumen exactamente 1.0
+        df_metas_p['PORCENTAJE'] = df_metas_p.groupby('SUCURSAL')['PORCENTAJE'].transform(lambda x: x / x.sum())
     else:
         df_metas_p = pd.DataFrame(columns=['CATEGORIA', 'SUCURSAL', 'AÑO', 'PORCENTAJE'])
         
