@@ -116,8 +116,6 @@ def cargar_datos():
         st.stop()
 
     df_dist.columns = df_dist.columns.str.strip().str.upper()
-    
-    # Detección flexible de la columna ÁREA (con o sin tilde)
     col_area_dist = 'ÁREA' if 'ÁREA' in df_dist.columns else ('AREA' if 'AREA' in df_dist.columns else df_dist.columns[0])
     col_dep_dist = 'DEPARTAMENTO' if 'DEPARTAMENTO' in df_dist.columns else df_dist.columns[1]
     col_cat_dist = 'CATEGORIA' if 'CATEGORIA' in df_dist.columns else df_dist.columns[2]
@@ -214,6 +212,9 @@ def cargar_datos():
     else:
         df_m2['DEPARTAMENTO'] = df_m2['CAT_NORM'].map(mapa_deps_cat).fillna('OTRAS CATEGORIAS')
 
+    # Consolidación obligatoria para evitar duplicados en llaves de merge
+    df_m2 = df_m2.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG'], as_index=False)['METROS'].sum()
+
     # 4. Cargar Tablas Maestras de Metas (META_2026.csv y Porcentajes)
     archivo_meta_global = "META_2026.csv"
     if os.path.exists(archivo_meta_global):
@@ -262,7 +263,6 @@ def cargar_datos():
         )
         df_metas_p['PORCENTAJE'] = pd.to_numeric(df_metas_p['PORCENTAJE'], errors='coerce').fillna(0.0) / 100.0
         
-        # Normalización exacta por sucursal
         df_metas_p['PORCENTAJE'] = df_metas_p.groupby('SUCURSAL')['PORCENTAJE'].transform(lambda x: x / x.sum())
     else:
         df_metas_p = pd.DataFrame(columns=['CATEGORIA_ORIG', 'CAT_NORM', 'SUCURSAL', 'AÑO', 'PORCENTAJE'])
