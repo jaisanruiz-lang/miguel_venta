@@ -308,7 +308,7 @@ meses_sel = st.sidebar.multiselect("Meses", meses_disponibles, default=meses_dis
 df_año = df[df['AÑO'] == año_sel]
 df_mes = df_año[df_año['MES'].isin(meses_sel)]
 
-# Incluir todas las sucursales maestras y de ventas para que ninguna se quede fuera
+# Sucursales
 sucursales_ventas = df_mes['SUCURSAL'].dropna().unique() if not df_mes.empty else []
 sucursales_metas = df_meta_g['SUCURSAL'].dropna().unique() if not df_meta_g.empty else []
 sucursales_disponibles = sorted(list(set(list(sucursales_ventas) + list(sucursales_metas))))
@@ -318,15 +318,18 @@ if not sucursales_disponibles:
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 df_suc = df_mes[df_mes['SUCURSAL'].isin(sucursal_sel)]
 
+# Usuarios
 usuarios_disponibles = sorted(df_suc['USUARIO'].dropna().unique())
 usuario_sel = st.sidebar.multiselect("Usuarios (Vendedores)", usuarios_disponibles, default=usuarios_disponibles, placeholder="Seleccione Usuarios...")
 df_us = df_suc[df_suc['USUARIO'].isin(usuario_sel)]
 
+# Áreas (FORZAR SELECCIÓN TOTAL POR DEFECTO)
 areas_en_data = df_us['ÁREA'].dropna().unique()
 areas_disponibles = [a for a in orden_areas_personalizado if a in areas_en_data] + [a for a in areas_en_data if a not in orden_areas_personalizado]
 area_sel = st.sidebar.multiselect("Área (Agrupación)", areas_disponibles, default=areas_disponibles, placeholder="Seleccione Áreas...")
 df_ar = df_us[df_us['ÁREA'].isin(area_sel)]
 
+# Departamentos (FORZAR SELECCIÓN TOTAL POR DEFECTO)
 departamentos_disponibles = sorted(df_ar['DEPARTAMENTO'].dropna().unique())
 departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
 
@@ -367,11 +370,9 @@ else:
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE COMERCIAL PRINCIPAL
 # -----------------------------------
-# TOMAR VENTAS COMO BASE PRINCIPAL PARA GARANTIZAR QUE NINGUNA CATEGORÍA SE PIERDA
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG'], observed=False)['VENTA'].sum().reset_index()
 tabla_actual = tabla_actual.rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
 
-# Cruzar Metros Cuadrados y Metas sobre la base de Ventas (outer join)
 df_m2_agrupado = df_m2[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG', 'METROS']].rename(columns={'CATEGORIA_ORIG': 'CATEGORIA'})
 tabla_base = pd.merge(tabla_actual, df_m2_agrupado, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 
