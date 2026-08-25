@@ -13,7 +13,6 @@ from reportlab.lib import colors
 # -----------------------------------
 st.set_page_config(page_title="Dashboard Comercial", layout="wide")
 
-# Estilos visuales personalizados
 st.markdown("""
     <style>
     .main-title {
@@ -34,7 +33,6 @@ st.markdown("""
         font-weight: 600 !important;
     }
     
-    /* --- FUENTE PARA LOS TÍTULOS Y TEXTOS DE LOS FILTROS --- */
     section[data-testid="stSidebar"] label {
         font-size: 14px !important; 
         font-weight: 600 !important;
@@ -51,12 +49,10 @@ st.markdown("""
         margin: 2px !important; 
     }
     
-    /* AGRANDAR EL MENÚ DESPLEGABLE DE BÚSQUEDA AL HACER CLIC */
     ul[role="listbox"] {
         max-height: 60vh !important;
     }
     
-    /* --- ELIMINAR "NO RESULTS" --- */
     div[data-baseweb="popover"] div:has(> div:contains("No results")) {
         display: none !important;
     }
@@ -64,7 +60,6 @@ st.markdown("""
         display: none !important;
     }
     
-    /* --- AGRANDAR EXCLUSIVAMENTE EL FONDO DEL FILTRO DE DEPARTAMENTOS --- */
     section[data-testid="stSidebar"] div[data-testid="stMultiSelect"]:nth-of-type(5) div[data-baseweb="select"] > div:first-child {
         min-height: 300px !important;
         align-items: flex-start !important; 
@@ -99,7 +94,7 @@ def formatear_porcentaje(valor):
 # -----------------------------------
 @st.cache_data(ttl="5m")
 def cargar_datos():
-    # 1. Cargar el mapa de Áreas y Departamentos desde el archivo de distribución
+    # 1. Cargar el mapa de Áreas y Departamentos
     archivo_dist = "distribucion_miguel.csv"
     if not os.path.exists(archivo_dist):
         st.error(f"No se encontró el archivo '{archivo_dist}'. Por favor súbelo o colócalo en la misma carpeta.")
@@ -116,7 +111,7 @@ def cargar_datos():
     df_dist.columns = df_dist.columns.str.replace('Á', 'A').str.replace('É', 'E').str.replace('Í', 'I').str.replace('Ó', 'O').str.replace('Ú', 'U')
     
     if 'AREA' not in df_dist.columns:
-        st.error(f"❌ No se encontró la columna 'AREA' o 'ÁREA' en el archivo {archivo_dist}. Las columnas encontradas son: {', '.join(df_dist.columns)}")
+        st.error(f"❌ No se encontró la columna 'AREA' o 'ÁREA' en el archivo {archivo_dist}.")
         st.stop()
 
     df_dist['AREA'] = df_dist['AREA'].ffill().astype(str).str.strip().str.upper()
@@ -137,7 +132,7 @@ def cargar_datos():
         try:
             df = pd.read_csv("ventas.csv", encoding="latin-1", sep=";")
         except Exception as e_local:
-            st.error(f"❌ Error al cargar las Ventas. Asegúrate de tener conexión a Google Drive o el archivo local 'ventas.csv'. Detalles: {e_local}")
+            st.error(f"❌ Error al cargar las Ventas. Detalles: {e_local}")
             st.stop()
         
     col_año = [c for c in df.columns if 'AÑO' in c.upper() or 'AÃ' in c.upper()]
@@ -187,12 +182,11 @@ def cargar_datos():
     # 3. Cargar Metros Cuadrados
     archivo_m2 = "METROS CUADRADOS POR CATEGORIA.csv"
     if not os.path.exists(archivo_m2):
-        st.error(f"No se encontró el archivo '{archivo_m2}'. Por favor súbelo o colócalo en la misma carpeta.")
+        st.error(f"No se encontró el archivo '{archivo_m2}'.")
         st.stop()
         
     df_m2 = pd.read_csv(archivo_m2, encoding="latin-1", sep=";")
     df_m2.columns = df_m2.columns.str.strip()
-    
     df_m2['CATEGORIA'] = df_m2['CATEGORIA'].astype(str).str.strip().str.upper()
     df_m2 = df_m2[(df_m2['CATEGORIA'] != 'NAN') & (df_m2['CATEGORIA'] != '')]
     
@@ -211,12 +205,11 @@ def cargar_datos():
     else:
         df_m2['DEPARTAMENTO'] = df_m2['CATEGORIA'].map(mapa_deps_cat).fillna('SIN DEPARTAMENTO')
 
-    # 4. Cargar Metas Globales (META_2026.csv) y Porcentajes por Categoría
+    # 4. Cargar Tablas Maestras de Metas (META_2026.csv y Porcentajes)
     archivo_meta_global = "META_2026.csv"
     if os.path.exists(archivo_meta_global):
         df_meta_g = pd.read_csv(archivo_meta_global, encoding="latin-1", sep=None, engine='python')
         df_meta_g.columns = df_meta_g.columns.str.strip().str.upper()
-        # Normalizar nombres de columnas posibles
         col_m_mes = [c for c in df_meta_g.columns if 'MES' in c][0] if [c for c in df_meta_g.columns if 'MES' in c] else 'MESES'
         col_m_val = [c for c in df_meta_g.columns if 'META' in c][0]
         col_m_suc = [c for c in df_meta_g.columns if 'SUCURSAL' in c][0]
@@ -290,7 +283,7 @@ df['MES'] = pd.Categorical(df['MES'].astype(str).str.upper().str.strip(), catego
 df['SUCURSAL'] = pd.Categorical(df['SUCURSAL'], categories=[s.upper() for s in orden_sucursales], ordered=True)
 
 # -----------------------------------
-# FILTROS DINÁMICOS EN CASCADA (SIDEBAR LATERAL)
+# FILTROS DINÁMICOS EN CASCADA (SIDEBAR)
 # -----------------------------------
 st.sidebar.header("Filtros de Análisis")
 
@@ -317,29 +310,19 @@ df_ar = df_us[df_us['ÁREA'].isin(area_sel)]
 departamentos_disponibles = sorted(df_ar['DEPARTAMENTO'].dropna().unique())
 departamentos_sel = st.sidebar.multiselect("Departamentos", departamentos_disponibles, default=departamentos_disponibles, placeholder="Seleccione Departamentos...")
 
-# Aplicar el filtro final de ventas
 df_filtrado = df_ar[df_ar['DEPARTAMENTO'].isin(departamentos_sel)]
 
 # -----------------------------------
-# CÁLCULO DE LA META OFICIAL USANDO META_2026 Y PORCENTAJES
+# CÁLCULO OFICIAL DE LA META (MESES X PORCENTAJES)
 # -----------------------------------
-# 1. Filtrar metas globales según año, meses y sucursales seleccionadas
 if not df_meta_g.empty:
     df_meta_g_sel = df_meta_g[(df_meta_g['AÑO'] == año_sel) & (df_meta_g['MES'].isin(meses_sel)) & (df_meta_g['SUCURSAL'].isin(sucursal_sel))]
-    # Sumar la meta global total para el período seleccionado y las sucursales seleccionadas
-    meta_global_total = df_meta_g_sel['META_GLOBAL'].sum()
+    meta_por_sucursal = df_meta_g_sel.groupby('SUCURSAL')['META_GLOBAL'].sum().to_dict()
 else:
-    meta_global_total = 0.0
+    meta_por_sucursal = {}
 
-# 2. Construir la tabla de metas por Categoría y Sucursal usando los porcentajes
 if not df_metas_p.empty:
     df_metas_p_sel = df_metas_p[(df_metas_p['AÑO'] == año_sel) & (df_metas_p['SUCURSAL'].isin(sucursal_sel))].copy()
-    # Si tenemos metas mensuales globales y porcentajes anuales/mensuales, calculamos la meta por categoría y sucursal multiplicando la meta global de los meses seleccionados por los porcentajes
-    # Para hacerlo robusto y exacto: sumamos la meta global de los meses elegidos por sucursal
-    meta_por_sucursal = df_meta_g_sel.groupby('SUCURSAL')['META_GLOBAL'].sum().to_dict()
-    
-    # Calcular la meta en valor absoluto para cada registro de porcentaje
-    # Nota: Si el porcentaje ya está ponderado o es mensual, lo distribuimos
     records_meta = []
     for suc in sucursal_sel:
         m_val = meta_por_sucursal.get(suc, 0.0)
@@ -366,10 +349,8 @@ else:
 # -----------------------------------
 df_m2_sel = df_m2[df_m2['DEPARTAMENTO'].isin(departamentos_sel)].copy()
 
-# Ventas actuales agrupadas por ÁREA, DEPARTAMENTO, CATEGORÍA
 tabla_actual = df_filtrado.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
 
-# Unir ventas con metros cuadrados y con las metas calculadas por categoría
 tabla_base = pd.merge(df_m2_sel[['ÁREA', 'DEPARTAMENTO', 'CATEGORIA', 'METROS']], tabla_actual, on=['ÁREA', 'DEPARTAMENTO', 'CATEGORIA'], how='outer')
 if not tabla_meta_final.empty:
     tabla_base = pd.merge(tabla_base, tabla_meta_final, on=['CATEGORIA'], how='left')
@@ -451,17 +432,14 @@ eficiencia_total = total_g_eficiencia
 
 # -----------------------------------
 # PROCESAMIENTO MATRICIAL: REPORTE DE VENDEDORES
-# (Para los vendedores, distribuimos la meta de forma proporcional a sus ventas o según su participación por categoría)
 # -----------------------------------
 tabla_us_actual = df_filtrado.groupby(['USUARIO', 'ÁREA', 'CATEGORIA'], observed=False)['VENTA'].sum().reset_index()
-# Unimos con la meta por categoría
 if not tabla_meta_final.empty:
     tabla_us_actual = pd.merge(tabla_us_actual, tabla_meta_final, on=['CATEGORIA'], how='left')
 else:
     tabla_us_actual['META'] = 0.0
 tabla_us_actual['META'] = tabla_us_actual['META'].fillna(0.0)
 
-# Para repartir la meta de la categoría entre los usuarios que vendieron en esa categoría de forma proporcional a sus ventas:
 total_ventas_cat = tabla_us_actual.groupby('CATEGORIA')['VENTA'].transform('sum')
 proporcion_usuario = np.where(total_ventas_cat > 0, tabla_us_actual['VENTA'] / total_ventas_cat, 0.0)
 tabla_us_actual['META_ASIGNADA'] = tabla_us_actual['META'] * proporcion_usuario
@@ -667,7 +645,7 @@ with st.expander("📊 ANÁLISIS - KPIs DE VENTAS", expanded=True):
     st.markdown("### 📥 MENÚ DE DESCARGA DE REPORTES")
     st.info("El informe de Excel se descarga libre de filas de subtotales y con codificación contable nativa de miles/decimales, permitiéndote realizar operaciones matemáticas al instante.")
     
-    # Fila 1: Reportes Comerciales Originales
+    # Fila 1: Reportes Comerciales Principales
     st.markdown("#### 📄 Reportes Principales (Área/Departamento/Categoría)")
     bot1, bot2 = st.columns(2)
     data_excel_comercial = generar_excel_descarga_sumable(df_para_excel, sheet_name='Reporte Comercial')
@@ -689,7 +667,7 @@ with st.expander("📊 ANÁLISIS - KPIs DE VENTAS", expanded=True):
 
     st.markdown("---")
 
-    # Fila 2: Nuevos Reportes de Vendedores
+    # Fila 2: Reportes de Vendedores
     st.markdown("#### 🧑‍💼 Reportes de Vendedores (Usuario/Área)")
     bot3, bot4 = st.columns(2)
     data_excel_vendedores = generar_excel_descarga_sumable(df_para_excel_us, sheet_name='Vendedores')
