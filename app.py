@@ -171,7 +171,7 @@ def cargar_datos():
     
     df['SUCURSAL'] = df['SUCURSAL'].str.replace('SUCURSAL ', '', regex=False).str.upper().str.strip()
     df['SUCURSAL'] = df['SUCURSAL'].replace({
-        'ALUMINIOLOGO WEB': 'ALUMUNIOLOGO WED',
+        'ALUMINIOLOGO WEB': 'ALUMINIOLOGO WEB',
         'SHOWROOM - 000': 'SHOWROOM'
     })
     
@@ -212,7 +212,6 @@ def cargar_datos():
     else:
         df_m2['DEPARTAMENTO'] = df_m2['CAT_NORM'].map(mapa_deps_cat).fillna('OTRAS CATEGORIAS')
 
-    # Consolidación obligatoria para evitar duplicados en llaves de merge
     df_m2 = df_m2.groupby(['ÁREA', 'DEPARTAMENTO', 'CATEGORIA_ORIG'], as_index=False)['METROS'].sum()
 
     # 4. Cargar Tablas Maestras de Metas (META_2026.csv y Porcentajes)
@@ -277,7 +276,7 @@ df, df_m2, df_meta_g, df_metas_p = cargar_datos()
 orden_meses = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 
                'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
 
-orden_sucursales = ['CATIA', 'LA GUAIRA', 'MARICHE', 'GUATIRE', 'ALUMUNIOLOGO WED', 
+orden_sucursales = ['CATIA', 'LA GUAIRA', 'MARICHE', 'GUATIRE', 'ALUMINIOLOGO WEB', 
                     'DISTRIBUIDORES', 'REPRESENTANTES COMERCIALES', 'SHOWROOM']
 
 orden_areas_personalizado = [
