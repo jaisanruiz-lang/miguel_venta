@@ -308,9 +308,12 @@ meses_sel = st.sidebar.multiselect("Meses", meses_disponibles, default=meses_dis
 df_año = df[df['AÑO'] == año_sel]
 df_mes = df_año[df_año['MES'].isin(meses_sel)]
 
-sucursales_disponibles = sorted(df_mes['SUCURSAL'].dropna().unique())
-if not sucursales_disponibles and not df_meta_g.empty:
-    sucursales_disponibles = sorted(df_meta_g['SUCURSAL'].dropna().unique())
+# Incluir todas las sucursales maestras y de ventas para que ninguna se quede fuera
+sucursales_ventas = df_mes['SUCURSAL'].dropna().unique() if not df_mes.empty else []
+sucursales_metas = df_meta_g['SUCURSAL'].dropna().unique() if not df_meta_g.empty else []
+sucursales_disponibles = sorted(list(set(list(sucursales_ventas) + list(sucursales_metas))))
+if not sucursales_disponibles:
+    sucursales_disponibles = orden_sucursales
 
 sucursal_sel = st.sidebar.multiselect("Sucursales", sucursales_disponibles, default=sucursales_disponibles, placeholder="Seleccione Sucursales...")
 df_suc = df_mes[df_mes['SUCURSAL'].isin(sucursal_sel)]
